@@ -65,6 +65,18 @@ def create_verification_code() -> str:
     return f"{secrets.randbelow(1_000_000):06d}"
 
 
+def hash_otp_code(code: str) -> str:
+    settings = get_settings()
+    secret = settings.auth_secret_key.encode("utf-8")
+    digest = hmac.new(secret, code.encode("utf-8"), hashlib.sha256).hexdigest()
+    return digest
+
+
+def verify_otp_code(code: str, code_hash: str) -> bool:
+    current = hash_otp_code(code)
+    return hmac.compare_digest(current, code_hash)
+
+
 def create_access_token(user_id: int, email: str) -> str:
     settings = get_settings()
     now = datetime.now(UTC)

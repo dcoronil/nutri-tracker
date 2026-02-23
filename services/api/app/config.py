@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     smtp_from_email: str = "no-reply@nutri-tracker.local"
     smtp_use_tls: bool = True
     expose_verification_code: bool = True
+    dev_email_mode: bool = True
 
 
 @lru_cache

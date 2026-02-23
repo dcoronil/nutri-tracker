@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import logging
 import smtplib
 from email.message import EmailMessage
 
 from app.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 
 class EmailSendError(RuntimeError):
@@ -12,18 +15,22 @@ class EmailSendError(RuntimeError):
 
 def send_verification_email(to_email: str, code: str) -> bool:
     settings = get_settings()
+
     if not settings.smtp_host:
+        if settings.dev_email_mode:
+            logger.info("DEV OTP for %s: %s", to_email, code)
+            return False
         return False
 
     message = EmailMessage()
-    message["Subject"] = "Nutri Tracker - Código de verificación"
+    message["Subject"] = "Nutri Tracker - Verification code"
     message["From"] = settings.smtp_from_email
     message["To"] = to_email
     message.set_content(
-        "Tu código de verificación es: "
+        "Your verification code is: "
         f"{code}\n\n"
-        "Este código expira en "
-        f"{settings.verification_code_ttl_minutes} minutos."
+        "This code expires in "
+        f"{settings.verification_code_ttl_minutes} minutes."
     )
 
     try:
@@ -33,7 +40,7 @@ def send_verification_email(to_email: str, code: str) -> bool:
             if settings.smtp_user and settings.smtp_password:
                 smtp.login(settings.smtp_user, settings.smtp_password)
             smtp.send_message(message)
-    except Exception as exc:  # pragma: no cover - integration boundary
-        raise EmailSendError(f"No se pudo enviar correo de verificación: {exc}") from exc
+    except Exception as exc:  # pragma: no cover - network integration boundary
+        raise EmailSendError(f"Unable to send verification email: {exc}") from exc
 
     return True

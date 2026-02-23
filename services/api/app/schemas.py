@@ -3,22 +3,51 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, EmailStr, Field, model_validator
 
 from app.models import ActivityLevel, GoalType, IntakeMethod, NutritionBasis, Sex
 
 
-class UserRead(BaseModel):
+class AuthUser(BaseModel):
     id: int
     email: str
-    is_verified: bool
+    email_verified: bool
+    onboarding_completed: bool
+
+
+class RegisterRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=8, max_length=128)
+
+
+class RegisterResponse(BaseModel):
+    user_id: int
+    email: str
+    email_verified: bool
+    onboarding_completed: bool
+    message: str
+    debug_verification_code: str | None = None
+
+
+class VerifyRequest(BaseModel):
+    email: EmailStr
+    code: str = Field(min_length=4, max_length=12)
+
+
+class ResendCodeRequest(BaseModel):
+    email: EmailStr
+
+
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=8, max_length=128)
 
 
 class ProfileInput(BaseModel):
     weight_kg: float = Field(gt=0)
     height_cm: float = Field(gt=0)
-    age: int = Field(ge=13, le=120)
-    sex: Sex
+    age: int | None = Field(default=None, ge=13, le=120)
+    sex: Sex = Sex.other
     activity_level: ActivityLevel = ActivityLevel.moderate
     goal_type: GoalType = GoalType.maintain
 
@@ -30,12 +59,8 @@ class ProfileInput(BaseModel):
     thigh_cm: float | None = Field(default=None, gt=0)
 
 
-class ProfileUpdate(ProfileInput):
-    pass
-
-
 class ProfileRead(ProfileInput):
-    bmi: float
+    bmi: float | None
     bmi_category: str
     bmi_color: str
     body_fat_percent: float | None
@@ -43,43 +68,39 @@ class ProfileRead(ProfileInput):
     body_fat_color: str
 
 
-class RegisterRequest(ProfileInput):
-    email: str = Field(min_length=5, max_length=255)
-    password: str = Field(min_length=8, max_length=128)
+class GoalFeedback(BaseModel):
+    realistic: bool
+    notes: list[str] = Field(default_factory=list)
 
 
-class RegisterResponse(BaseModel):
-    user_id: int
-    email: str
-    verification_required: bool
-    message: str
-    debug_verification_code: str | None = None
+class DailyGoalUpsert(BaseModel):
+    kcal_goal: float = Field(gt=0)
+    protein_goal: float = Field(gt=0)
+    fat_goal: float = Field(gt=0)
+    carbs_goal: float = Field(gt=0)
 
 
-class VerifyEmailRequest(BaseModel):
-    email: str
-    code: str = Field(min_length=4, max_length=12)
+class DailyGoalResponse(DailyGoalUpsert):
+    feedback: GoalFeedback
 
 
-class EmailRequest(BaseModel):
-    email: str
-
-
-class LoginRequest(BaseModel):
-    email: str
-    password: str = Field(min_length=8, max_length=128)
+class MeResponse(BaseModel):
+    user: AuthUser
+    profile: ProfileRead | None = None
 
 
 class AuthResponse(BaseModel):
     access_token: str
     token_type: Literal["bearer"] = "bearer"
-    user: UserRead
-    profile: ProfileRead
+    user: AuthUser
+    profile: ProfileRead | None = None
 
 
-class GoalFeedback(BaseModel):
-    realistic: bool
-    notes: list[str] = Field(default_factory=list)
+class ProductPreference(BaseModel):
+    method: IntakeMethod
+    quantity_g: float | None = None
+    quantity_units: float | None = None
+    percent_pack: float | None = None
 
 
 class ProductRead(BaseModel):
@@ -108,6 +129,7 @@ class ProductLookupResponse(BaseModel):
     product: ProductRead | None = None
     missing_fields: list[str] = Field(default_factory=list)
     message: str | None = None
+    preferred_serving: ProductPreference | None = None
 
 
 class NutritionExtract(BaseModel):
@@ -142,11 +164,11 @@ class IntakeCreate(BaseModel):
     @model_validator(mode="after")
     def validate_quantity(self) -> IntakeCreate:
         if self.method == IntakeMethod.grams and self.quantity_g is None:
-            raise ValueError("quantity_g es obligatorio cuando method=grams")
+            raise ValueError("quantity_g is required when method=grams")
         if self.method == IntakeMethod.units and self.quantity_units is None:
-            raise ValueError("quantity_units es obligatorio cuando method=units")
+            raise ValueError("quantity_units is required when method=units")
         if self.method == IntakeMethod.percent_pack and self.percent_pack is None:
-            raise ValueError("percent_pack es obligatorio cuando method=percent_pack")
+            raise ValueError("percent_pack is required when method=percent_pack")
         return self
 
 
@@ -164,26 +186,13 @@ class IntakeNutrients(BaseModel):
 class IntakeRead(BaseModel):
     id: int
     product_id: int
-    product_name: str | None = None
+    product_name: str | None
     method: IntakeMethod
     quantity_g: float | None
     quantity_units: float | None
     percent_pack: float | None
     created_at: datetime
     nutrients: IntakeNutrients
-
-    model_config = {"from_attributes": True}
-
-
-class DailyGoalUpsert(BaseModel):
-    kcal_goal: float = Field(gt=0)
-    protein_goal: float = Field(gt=0)
-    fat_goal: float = Field(gt=0)
-    carbs_goal: float = Field(gt=0)
-
-
-class DailyGoalResponse(DailyGoalUpsert):
-    feedback: GoalFeedback
 
 
 class DaySummary(BaseModel):

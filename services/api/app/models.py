@@ -50,7 +50,20 @@ class UserAccount(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     email: str = Field(unique=True, index=True, max_length=255)
     password_hash: str = Field(max_length=255)
-    is_verified: bool = Field(default=False)
+    email_verified: bool = Field(default=False)
+    onboarding_completed: bool = Field(default=False)
+    created_at: datetime = Field(default_factory=utcnow)
+
+
+class EmailOTP(SQLModel, table=True):
+    __tablename__ = "email_otp"
+
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user_account.id", index=True)
+    code_hash: str = Field(max_length=255)
+    expires_at: datetime
+    attempts: int = Field(default=0)
+    used_at: datetime | None = None
     created_at: datetime = Field(default_factory=utcnow)
 
 
@@ -60,7 +73,7 @@ class UserProfile(SQLModel, table=True):
     user_id: int = Field(primary_key=True, foreign_key="user_account.id")
     weight_kg: float = Field(gt=0)
     height_cm: float = Field(gt=0)
-    age: int = Field(ge=13, le=120)
+    age: int | None = Field(default=None, ge=13, le=120)
     sex: Sex = Field(default=Sex.other)
     activity_level: ActivityLevel = Field(default=ActivityLevel.moderate)
     goal_type: GoalType = Field(default=GoalType.maintain)
@@ -72,18 +85,9 @@ class UserProfile(SQLModel, table=True):
     arm_cm: float | None = Field(default=None, gt=0)
     thigh_cm: float | None = Field(default=None, gt=0)
 
+    bmi: float | None = Field(default=None, ge=0)
+    body_fat_percent: float | None = Field(default=None, ge=0)
     updated_at: datetime = Field(default_factory=utcnow)
-
-
-class EmailVerificationCode(SQLModel, table=True):
-    __tablename__ = "email_verification_code"
-
-    id: int | None = Field(default=None, primary_key=True)
-    user_id: int = Field(foreign_key="user_account.id", index=True)
-    code: str = Field(max_length=12)
-    expires_at: datetime
-    used_at: datetime | None = None
-    created_at: datetime = Field(default_factory=utcnow)
 
 
 class Product(SQLModel, table=True):
@@ -106,6 +110,20 @@ class Product(SQLModel, table=True):
 
     data_confidence: str = Field(default="manual", max_length=64)
     created_at: datetime = Field(default_factory=utcnow)
+
+
+class UserProductPreference(SQLModel, table=True):
+    __tablename__ = "user_product_preference"
+    __table_args__ = (UniqueConstraint("user_id", "product_id", name="uq_user_product_pref"),)
+
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user_account.id", index=True)
+    product_id: int = Field(foreign_key="product.id", index=True)
+    method: IntakeMethod = Field(default=IntakeMethod.grams)
+    quantity_g: float | None = Field(default=None, ge=0)
+    quantity_units: float | None = Field(default=None, ge=0)
+    percent_pack: float | None = Field(default=None, ge=0, le=100)
+    updated_at: datetime = Field(default_factory=utcnow)
 
 
 class Intake(SQLModel, table=True):

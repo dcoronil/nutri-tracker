@@ -11,44 +11,49 @@ from app.config import get_settings
 from app.database import get_session
 from app.models import (
     DailyGoal,
-    EmailVerificationCode,
+    EmailOTP,
     Intake,
     NutritionBasis,
     Product,
     UserAccount,
+    UserProductPreference,
     UserProfile,
 )
 from app.schemas import (
     AuthResponse,
+    AuthUser,
     CalendarDayEntry,
     CalendarMonthResponse,
     DailyGoalResponse,
     DailyGoalUpsert,
     DaySummary,
-    EmailRequest,
     GoalFeedback,
     IntakeCreate,
     IntakeRead,
     LabelPhotoResponse,
     LoginRequest,
+    MeResponse,
     NutritionExtract,
     ProductLookupResponse,
+    ProductPreference,
     ProductRead,
     ProfileAnalysisResponse,
+    ProfileInput,
     ProfileRead,
-    ProfileUpdate,
     RegisterRequest,
     RegisterResponse,
-    UserRead,
-    VerifyEmailRequest,
+    ResendCodeRequest,
+    VerifyRequest,
 )
 from app.services.auth import (
     AuthTokenError,
     create_access_token,
     create_verification_code,
+    hash_otp_code,
     hash_password,
     validate_email_format,
     verify_access_token,
+    verify_otp_code,
     verify_password,
 )
 from app.services.body_metrics import (
@@ -82,14 +87,32 @@ router = APIRouter()
 
 EAN_PATTERN = re.compile(r"^\d{8,14}$")
 MONTH_PATTERN = re.compile(r"^\d{4}-\d{2}$")
+OTP_MAX_ATTEMPTS = 5
+
+
+def _to_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
+def _auth_user(user: UserAccount) -> AuthUser:
+    return AuthUser(
+        id=user.id,
+        email=user.email,
+        email_verified=user.email_verified,
+        onboarding_completed=user.onboarding_completed,
+    )
 
 
 def _profile_to_read(profile: UserProfile) -> ProfileRead:
-    bmi_value = bmi(profile.weight_kg, profile.height_cm)
+    bmi_value = profile.bmi if profile.bmi is not None else bmi(profile.weight_kg, profile.height_cm)
     bmi_label, bmi_color = bmi_category(bmi_value)
 
-    body_fat_value = body_fat_percent(profile)
-    body_fat_label, body_fat_color = body_fat_category(body_fat_value, profile.sex)
+    fat_value = profile.body_fat_percent
+    if fat_value is None:
+        fat_value = body_fat_percent(profile)
+    fat_label, fat_color = body_fat_category(fat_value, profile.sex)
 
     return ProfileRead(
         weight_kg=profile.weight_kg,
@@ -107,23 +130,21 @@ def _profile_to_read(profile: UserProfile) -> ProfileRead:
         bmi=bmi_value,
         bmi_category=bmi_label,
         bmi_color=bmi_color,
-        body_fat_percent=body_fat_value,
-        body_fat_category=body_fat_label,
-        body_fat_color=body_fat_color,
+        body_fat_percent=fat_value,
+        body_fat_category=fat_label,
+        body_fat_color=fat_color,
     )
 
 
+def _load_profile(session: Session, user_id: int) -> UserProfile | None:
+    return session.get(UserProfile, user_id)
+
+
 def _load_profile_or_404(session: Session, user_id: int) -> UserProfile:
-    profile = session.get(UserProfile, user_id)
+    profile = _load_profile(session, user_id)
     if not profile:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Perfil no encontrado")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found")
     return profile
-
-
-def _to_utc(value: datetime) -> datetime:
-    if value.tzinfo is None:
-        return value.replace(tzinfo=UTC)
-    return value.astimezone(UTC)
 
 
 def get_current_user(
@@ -131,11 +152,11 @@ def get_current_user(
     authorization: Annotated[str | None, Header()] = None,
 ) -> UserAccount:
     if not authorization:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Falta header Authorization")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing Authorization header")
 
     scheme, _, token = authorization.partition(" ")
     if scheme.lower() != "bearer" or not token:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authorization inválido")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid Authorization header")
 
     try:
         payload = verify_access_token(token)
@@ -144,9 +165,53 @@ def get_current_user(
 
     user = session.get(UserAccount, payload["uid"])
     if not user:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Usuario no existe")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
 
     return user
+
+
+def get_verified_user(
+    current_user: Annotated[UserAccount, Depends(get_current_user)],
+) -> UserAccount:
+    if not current_user.email_verified:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Email is not verified")
+    return current_user
+
+
+def get_ready_user(
+    current_user: Annotated[UserAccount, Depends(get_verified_user)],
+) -> UserAccount:
+    if not current_user.onboarding_completed:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Onboarding not completed")
+    return current_user
+
+
+def _otp_response(user: UserAccount, message: str, code: str | None) -> RegisterResponse:
+    settings = get_settings()
+    debug_code = code if settings.expose_verification_code else None
+
+    return RegisterResponse(
+        user_id=user.id,
+        email=user.email,
+        email_verified=user.email_verified,
+        onboarding_completed=user.onboarding_completed,
+        message=message,
+        debug_verification_code=debug_code,
+    )
+
+
+def _create_otp(session: Session, user: UserAccount) -> str:
+    settings = get_settings()
+    raw_code = create_verification_code()
+
+    otp = EmailOTP(
+        user_id=user.id,
+        code_hash=hash_otp_code(raw_code),
+        expires_at=datetime.now(UTC) + timedelta(minutes=settings.verification_code_ttl_minutes),
+        attempts=0,
+    )
+    session.add(otp)
+    return raw_code
 
 
 @router.get("/health")
@@ -161,138 +226,107 @@ def register(
 ) -> RegisterResponse:
     email = payload.email.strip().lower()
     if not validate_email_format(email):
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Email inválido")
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid email")
 
     existing = session.exec(select(UserAccount).where(UserAccount.email == email)).first()
     if existing:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email ya registrado")
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
 
-    try:
-        password_hash = hash_password(payload.password)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
-
-    user = UserAccount(email=email, password_hash=password_hash, is_verified=False)
+    password_hash = hash_password(payload.password)
+    user = UserAccount(
+        email=email,
+        password_hash=password_hash,
+        email_verified=False,
+        onboarding_completed=False,
+    )
     session.add(user)
     session.flush()
 
-    profile = UserProfile(
-        user_id=user.id,
-        weight_kg=payload.weight_kg,
-        height_cm=payload.height_cm,
-        age=payload.age,
-        sex=payload.sex,
-        activity_level=payload.activity_level,
-        goal_type=payload.goal_type,
-        waist_cm=payload.waist_cm,
-        neck_cm=payload.neck_cm,
-        hip_cm=payload.hip_cm,
-        chest_cm=payload.chest_cm,
-        arm_cm=payload.arm_cm,
-        thigh_cm=payload.thigh_cm,
-    )
-    session.add(profile)
-
-    settings = get_settings()
-    code = create_verification_code()
-    verification = EmailVerificationCode(
-        user_id=user.id,
-        code=code,
-        expires_at=datetime.now(UTC) + timedelta(minutes=settings.verification_code_ttl_minutes),
-    )
-    session.add(verification)
+    raw_code = _create_otp(session, user)
     session.commit()
 
-    message = "Cuenta creada. Revisa tu correo para verificar el código."
+    message = "Account created. Verify your email with the code."
     try:
-        sent = send_verification_email(email, code)
+        sent = send_verification_email(email, raw_code)
     except EmailSendError:
         sent = False
 
     if not sent:
-        message = "Cuenta creada. Correo no configurado; usa código de verificación temporal."
+        message = "Account created. SMTP disabled, use development OTP code."
 
-    return RegisterResponse(
-        user_id=user.id,
-        email=email,
-        verification_required=True,
-        message=message,
-        debug_verification_code=code if settings.expose_verification_code else None,
-    )
+    return _otp_response(user, message, raw_code)
 
 
 @router.post("/auth/resend-code", response_model=RegisterResponse)
 def resend_code(
-    payload: EmailRequest,
+    payload: ResendCodeRequest,
     session: Annotated[Session, Depends(get_session)],
 ) -> RegisterResponse:
     email = payload.email.strip().lower()
     user = session.exec(select(UserAccount).where(UserAccount.email == email)).first()
     if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuario no encontrado")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
-    settings = get_settings()
-    code = create_verification_code()
-    verification = EmailVerificationCode(
-        user_id=user.id,
-        code=code,
-        expires_at=datetime.now(UTC) + timedelta(minutes=settings.verification_code_ttl_minutes),
-    )
-    session.add(verification)
+    raw_code = _create_otp(session, user)
     session.commit()
 
-    message = "Nuevo código generado."
+    message = "A new verification code was generated."
     try:
-        sent = send_verification_email(email, code)
+        sent = send_verification_email(email, raw_code)
     except EmailSendError:
         sent = False
 
     if not sent:
-        message = "SMTP no configurado; usa código temporal mostrado por el backend."
+        message = "SMTP disabled, use development OTP code."
 
-    return RegisterResponse(
-        user_id=user.id,
-        email=email,
-        verification_required=True,
-        message=message,
-        debug_verification_code=code if settings.expose_verification_code else None,
-    )
+    return _otp_response(user, message, raw_code)
 
 
-@router.post("/auth/verify-email", response_model=AuthResponse)
+@router.post("/auth/verify", response_model=AuthResponse)
 def verify_email(
-    payload: VerifyEmailRequest,
+    payload: VerifyRequest,
     session: Annotated[Session, Depends(get_session)],
 ) -> AuthResponse:
     email = payload.email.strip().lower()
     user = session.exec(select(UserAccount).where(UserAccount.email == email)).first()
     if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuario no encontrado")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
-    statement = (
-        select(EmailVerificationCode)
-        .where(EmailVerificationCode.user_id == user.id)
-        .where(EmailVerificationCode.used_at.is_(None))
-        .order_by(desc(EmailVerificationCode.created_at))
-    )
-    record = session.exec(statement).first()
+    otp = session.exec(
+        select(EmailOTP)
+        .where(EmailOTP.user_id == user.id)
+        .where(EmailOTP.used_at.is_(None))
+        .order_by(desc(EmailOTP.created_at))
+    ).first()
 
-    if not record or record.code != payload.code:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Código inválido")
-    if _to_utc(record.expires_at) < datetime.now(UTC):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Código expirado")
+    if not otp:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No active verification code")
 
-    user.is_verified = True
-    record.used_at = datetime.now(UTC)
+    if otp.attempts >= OTP_MAX_ATTEMPTS:
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Too many attempts")
+
+    if _to_utc(otp.expires_at) < datetime.now(UTC):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Verification code expired")
+
+    if not verify_otp_code(payload.code, otp.code_hash):
+        otp.attempts += 1
+        session.add(otp)
+        session.commit()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid verification code")
+
+    user.email_verified = True
+    otp.used_at = datetime.now(UTC)
+    session.add(user)
+    session.add(otp)
     session.commit()
 
-    profile = _load_profile_or_404(session, user.id)
     token = create_access_token(user.id, user.email)
+    profile = _load_profile(session, user.id)
 
     return AuthResponse(
         access_token=token,
-        user=UserRead(id=user.id, email=user.email, is_verified=user.is_verified),
-        profile=_profile_to_read(profile),
+        user=_auth_user(user),
+        profile=_profile_to_read(profile) if profile else None,
     )
 
 
@@ -304,37 +338,34 @@ def login(
     email = payload.email.strip().lower()
     user = session.exec(select(UserAccount).where(UserAccount.email == email)).first()
     if not user or not verify_password(payload.password, user.password_hash):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Credenciales inválidas")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
-    if not user.is_verified:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Debes verificar tu email")
-
-    profile = _load_profile_or_404(session, user.id)
     token = create_access_token(user.id, user.email)
+    profile = _load_profile(session, user.id)
 
     return AuthResponse(
         access_token=token,
-        user=UserRead(id=user.id, email=user.email, is_verified=user.is_verified),
-        profile=_profile_to_read(profile),
+        user=_auth_user(user),
+        profile=_profile_to_read(profile) if profile else None,
     )
 
 
-@router.get("/me/profile", response_model=ProfileRead)
-def me_profile(
+@router.get("/me", response_model=MeResponse)
+def me(
     current_user: Annotated[UserAccount, Depends(get_current_user)],
     session: Annotated[Session, Depends(get_session)],
-) -> ProfileRead:
-    profile = _load_profile_or_404(session, current_user.id)
-    return _profile_to_read(profile)
+) -> MeResponse:
+    profile = _load_profile(session, current_user.id)
+    return MeResponse(user=_auth_user(current_user), profile=_profile_to_read(profile) if profile else None)
 
 
-@router.put("/me/profile", response_model=ProfileRead)
+@router.post("/profile", response_model=ProfileRead)
 def upsert_profile(
-    payload: ProfileUpdate,
-    current_user: Annotated[UserAccount, Depends(get_current_user)],
+    payload: ProfileInput,
+    current_user: Annotated[UserAccount, Depends(get_verified_user)],
     session: Annotated[Session, Depends(get_session)],
 ) -> ProfileRead:
-    profile = session.get(UserProfile, current_user.id)
+    profile = _load_profile(session, current_user.id)
 
     if profile is None:
         profile = UserProfile(
@@ -369,6 +400,10 @@ def upsert_profile(
         profile.thigh_cm = payload.thigh_cm
         profile.updated_at = datetime.now(UTC)
 
+    profile.bmi = bmi(profile.weight_kg, profile.height_cm)
+    profile.body_fat_percent = body_fat_percent(profile)
+
+    session.add(profile)
     session.commit()
     session.refresh(profile)
     return _profile_to_read(profile)
@@ -376,57 +411,72 @@ def upsert_profile(
 
 @router.get("/me/analysis", response_model=ProfileAnalysisResponse)
 def me_analysis(
-    current_user: Annotated[UserAccount, Depends(get_current_user)],
+    current_user: Annotated[UserAccount, Depends(get_verified_user)],
     session: Annotated[Session, Depends(get_session)],
     day: date | None = None,
 ) -> ProfileAnalysisResponse:
     profile = _load_profile_or_404(session, current_user.id)
-    profile_read = _profile_to_read(profile)
-
     recommended = recommended_goals(profile)
-    recommendation_payload = DailyGoalUpsert(**recommended)
 
     target_day = day or datetime.now(UTC).date()
-    goal_statement = (
-        select(DailyGoal)
-        .where(DailyGoal.user_id == current_user.id)
-        .where(DailyGoal.date == target_day)
-    )
-    current_goal = session.exec(goal_statement).first()
+    goal = session.exec(
+        select(DailyGoal).where(DailyGoal.user_id == current_user.id).where(DailyGoal.date == target_day)
+    ).first()
 
     feedback = None
-    if current_goal:
+    if goal:
         feedback = GoalFeedback(
             **goal_feedback(
                 profile,
                 {
-                    "kcal_goal": current_goal.kcal_goal,
-                    "protein_goal": current_goal.protein_goal,
-                    "fat_goal": current_goal.fat_goal,
-                    "carbs_goal": current_goal.carbs_goal,
+                    "kcal_goal": goal.kcal_goal,
+                    "protein_goal": goal.protein_goal,
+                    "fat_goal": goal.fat_goal,
+                    "carbs_goal": goal.carbs_goal,
                 },
                 recommended,
             )
         )
 
     return ProfileAnalysisResponse(
-        profile=profile_read,
-        recommended_goal=recommendation_payload,
+        profile=_profile_to_read(profile),
+        recommended_goal=DailyGoalUpsert(**recommended),
         goal_feedback_today=feedback,
+    )
+
+
+def _preference_payload(pref: UserProductPreference | None) -> ProductPreference | None:
+    if not pref:
+        return None
+    return ProductPreference(
+        method=pref.method,
+        quantity_g=pref.quantity_g,
+        quantity_units=pref.quantity_units,
+        percent_pack=pref.percent_pack,
     )
 
 
 @router.get("/products/by_barcode/{ean}", response_model=ProductLookupResponse)
 async def product_by_barcode(
     ean: str,
+    current_user: Annotated[UserAccount, Depends(get_ready_user)],
     session: Annotated[Session, Depends(get_session)],
 ) -> ProductLookupResponse:
     if not EAN_PATTERN.match(ean):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="EAN/UPC inválido")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid EAN/UPC")
 
     local = session.exec(select(Product).where(Product.barcode == ean)).first()
     if local:
-        return ProductLookupResponse(source="local", product=ProductRead.model_validate(local))
+        pref = session.exec(
+            select(UserProductPreference)
+            .where(UserProductPreference.user_id == current_user.id)
+            .where(UserProductPreference.product_id == local.id)
+        ).first()
+        return ProductLookupResponse(
+            source="local",
+            product=ProductRead.model_validate(local),
+            preferred_serving=_preference_payload(pref),
+        )
 
     try:
         off_product = await fetch_openfoodfacts_product(ean)
@@ -434,17 +484,14 @@ async def product_by_barcode(
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
     if off_product is None:
-        return ProductLookupResponse(
-            source="not_found",
-            message="Producto no encontrado en base local ni en OpenFoodFacts",
-        )
+        return ProductLookupResponse(source="not_found", message="Product not found")
 
     missing = off_missing_critical_fields(off_product)
     if missing:
         return ProductLookupResponse(
             source="openfoodfacts_incomplete",
             missing_fields=missing,
-            message="OpenFoodFacts no trae nutrición suficiente. Captura foto de etiqueta.",
+            message="Missing nutrition fields. Capture the label.",
         )
 
     product = Product(
@@ -468,14 +515,12 @@ async def product_by_barcode(
     session.commit()
     session.refresh(product)
 
-    return ProductLookupResponse(
-        source="openfoodfacts_imported",
-        product=ProductRead.model_validate(product),
-    )
+    return ProductLookupResponse(source="openfoodfacts_imported", product=ProductRead.model_validate(product))
 
 
 @router.post("/products/from_label_photo", response_model=LabelPhotoResponse)
 async def create_product_from_label_photo(
+    current_user: Annotated[UserAccount, Depends(get_ready_user)],
     session: Annotated[Session, Depends(get_session)],
     barcode: Annotated[str | None, Form()] = None,
     name: Annotated[str | None, Form()] = None,
@@ -486,6 +531,8 @@ async def create_product_from_label_photo(
     label_text: Annotated[str | None, Form()] = None,
     photos: Annotated[list[UploadFile] | None, File()] = None,
 ) -> LabelPhotoResponse:
+    del current_user
+
     photo_files = photos or []
     extracted_text = (label_text or "").strip()
     if not extracted_text and photo_files:
@@ -498,17 +545,14 @@ async def create_product_from_label_photo(
     questions = coherence_questions(extracted)
 
     if not extracted_text:
-        questions.insert(
-            0,
-            "No pude extraer texto de la etiqueta. Sube una foto más nítida o pega el texto OCR.",
-        )
+        questions.insert(0, "Could not extract text from label. Upload a clearer image or paste OCR text.")
 
     if not name:
-        questions.append("Falta el nombre del producto.")
+        questions.append("Missing product name.")
 
     if missing_fields:
         for field in missing_fields:
-            questions.append(f"Falta {field}. ¿Puedes confirmarlo manualmente?")
+            questions.append(f"Missing {field}. Please confirm manually.")
 
     nutrition_payload = NutritionExtract.model_validate(extracted)
 
@@ -577,12 +621,12 @@ async def create_product_from_label_photo(
 @router.post("/intakes", response_model=IntakeRead)
 def create_intake(
     payload: IntakeCreate,
-    current_user: Annotated[UserAccount, Depends(get_current_user)],
+    current_user: Annotated[UserAccount, Depends(get_ready_user)],
     session: Annotated[Session, Depends(get_session)],
 ) -> IntakeRead:
     product = session.get(Product, payload.product_id)
     if not product:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Producto no encontrado")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
 
     try:
         resolved_quantity_g = quantity_from_method(
@@ -593,10 +637,7 @@ def create_intake(
             percent_pack=payload.percent_pack,
         )
     except IntakeComputationError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=str(exc),
-        ) from exc
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
     intake = Intake(
         user_id=current_user.id,
@@ -608,11 +649,34 @@ def create_intake(
         created_at=payload.created_at or datetime.now(UTC),
     )
     session.add(intake)
+
+    preference = session.exec(
+        select(UserProductPreference)
+        .where(UserProductPreference.user_id == current_user.id)
+        .where(UserProductPreference.product_id == payload.product_id)
+    ).first()
+    if preference is None:
+        preference = UserProductPreference(
+            user_id=current_user.id,
+            product_id=payload.product_id,
+            method=payload.method,
+            quantity_g=payload.quantity_g,
+            quantity_units=payload.quantity_units,
+            percent_pack=payload.percent_pack,
+            updated_at=datetime.now(UTC),
+        )
+        session.add(preference)
+    else:
+        preference.method = payload.method
+        preference.quantity_g = payload.quantity_g
+        preference.quantity_units = payload.quantity_units
+        preference.percent_pack = payload.percent_pack
+        preference.updated_at = datetime.now(UTC)
+
     session.commit()
     session.refresh(intake)
 
     nutrients = nutrients_for_quantity(product, resolved_quantity_g)
-
     return IntakeRead(
         id=intake.id,
         product_id=intake.product_id,
@@ -626,25 +690,23 @@ def create_intake(
     )
 
 
-@router.get("/days/{day}/summary", response_model=DaySummary)
-def day_summary(
+def _day_summary(
     day: date,
-    current_user: Annotated[UserAccount, Depends(get_current_user)],
+    current_user: Annotated[UserAccount, Depends(get_ready_user)],
     session: Annotated[Session, Depends(get_session)],
 ) -> DaySummary:
     start_dt = datetime.combine(day, time.min).replace(tzinfo=UTC)
     end_dt = datetime.combine(day + timedelta(days=1), time.min).replace(tzinfo=UTC)
 
-    statement = (
+    intakes = session.exec(
         select(Intake)
         .where(Intake.user_id == current_user.id)
         .where(Intake.created_at >= start_dt)
         .where(Intake.created_at < end_dt)
-    )
-    intakes = session.exec(statement).all()
+    ).all()
 
     consumed = zero_nutrients()
-    intake_rows: list[IntakeRead] = []
+    rows: list[IntakeRead] = []
     product_cache: dict[int, Product] = {}
 
     for intake in intakes:
@@ -659,7 +721,7 @@ def day_summary(
 
         nutrients = nutrients_for_quantity(product, intake.quantity_g)
         consumed = sum_nutrients(consumed, nutrients)
-        intake_rows.append(
+        rows.append(
             IntakeRead(
                 id=intake.id,
                 product_id=intake.product_id,
@@ -674,14 +736,11 @@ def day_summary(
         )
 
     goal = session.exec(
-        select(DailyGoal)
-        .where(DailyGoal.user_id == current_user.id)
-        .where(DailyGoal.date == day)
+        select(DailyGoal).where(DailyGoal.user_id == current_user.id).where(DailyGoal.date == day)
     ).first()
 
     goal_payload = None
     remaining = None
-
     if goal:
         goal_payload = DailyGoalUpsert(
             kcal_goal=goal.kcal_goal,
@@ -699,26 +758,38 @@ def day_summary(
             consumed,
         )
 
-    return DaySummary(
-        date=day,
-        goal=goal_payload,
-        consumed=consumed,
-        remaining=remaining,
-        intakes=intake_rows,
-    )
+    return DaySummary(date=day, goal=goal_payload, consumed=consumed, remaining=remaining, intakes=rows)
+
+
+@router.get("/days/{day}/summary", response_model=DaySummary)
+def day_summary(
+    day: date,
+    current_user: Annotated[UserAccount, Depends(get_ready_user)],
+    session: Annotated[Session, Depends(get_session)],
+) -> DaySummary:
+    return _day_summary(day=day, current_user=current_user, session=session)
+
+
+@router.get("/days/{day}", response_model=DaySummary)
+def day_summary_legacy(
+    day: date,
+    current_user: Annotated[UserAccount, Depends(get_ready_user)],
+    session: Annotated[Session, Depends(get_session)],
+) -> DaySummary:
+    return _day_summary(day=day, current_user=current_user, session=session)
 
 
 @router.post("/goals/{day}", response_model=DailyGoalResponse)
 def upsert_daily_goal(
     day: date,
     payload: DailyGoalUpsert,
-    current_user: Annotated[UserAccount, Depends(get_current_user)],
+    current_user: Annotated[UserAccount, Depends(get_verified_user)],
     session: Annotated[Session, Depends(get_session)],
 ) -> DailyGoalResponse:
+    profile = _load_profile_or_404(session, current_user.id)
+
     existing = session.exec(
-        select(DailyGoal)
-        .where(DailyGoal.user_id == current_user.id)
-        .where(DailyGoal.date == day)
+        select(DailyGoal).where(DailyGoal.user_id == current_user.id).where(DailyGoal.date == day)
     ).first()
 
     if existing:
@@ -727,19 +798,23 @@ def upsert_daily_goal(
         existing.fat_goal = payload.fat_goal
         existing.carbs_goal = payload.carbs_goal
     else:
-        existing = DailyGoal(
-            user_id=current_user.id,
-            date=day,
-            kcal_goal=payload.kcal_goal,
-            protein_goal=payload.protein_goal,
-            fat_goal=payload.fat_goal,
-            carbs_goal=payload.carbs_goal,
+        session.add(
+            DailyGoal(
+                user_id=current_user.id,
+                date=day,
+                kcal_goal=payload.kcal_goal,
+                protein_goal=payload.protein_goal,
+                fat_goal=payload.fat_goal,
+                carbs_goal=payload.carbs_goal,
+            )
         )
-        session.add(existing)
+
+    if not current_user.onboarding_completed:
+        current_user.onboarding_completed = True
+        session.add(current_user)
 
     session.commit()
 
-    profile = _load_profile_or_404(session, current_user.id)
     recommended = recommended_goals(profile)
     feedback_payload = GoalFeedback(
         **goal_feedback(
@@ -758,14 +833,50 @@ def upsert_daily_goal(
     )
 
 
+@router.get("/goals/{day}", response_model=DailyGoalResponse | None)
+def get_daily_goal(
+    day: date,
+    current_user: Annotated[UserAccount, Depends(get_verified_user)],
+    session: Annotated[Session, Depends(get_session)],
+) -> DailyGoalResponse | None:
+    profile = _load_profile_or_404(session, current_user.id)
+    goal = session.exec(
+        select(DailyGoal).where(DailyGoal.user_id == current_user.id).where(DailyGoal.date == day)
+    ).first()
+    if not goal:
+        return None
+
+    recommended = recommended_goals(profile)
+    feedback_payload = GoalFeedback(
+        **goal_feedback(
+            profile,
+            {
+                "kcal_goal": goal.kcal_goal,
+                "protein_goal": goal.protein_goal,
+                "fat_goal": goal.fat_goal,
+                "carbs_goal": goal.carbs_goal,
+            },
+            recommended,
+        )
+    )
+
+    return DailyGoalResponse(
+        kcal_goal=goal.kcal_goal,
+        protein_goal=goal.protein_goal,
+        fat_goal=goal.fat_goal,
+        carbs_goal=goal.carbs_goal,
+        feedback=feedback_payload,
+    )
+
+
 @router.get("/calendar/{year_month}", response_model=CalendarMonthResponse)
 def month_calendar(
     year_month: str,
-    current_user: Annotated[UserAccount, Depends(get_current_user)],
+    current_user: Annotated[UserAccount, Depends(get_ready_user)],
     session: Annotated[Session, Depends(get_session)],
 ) -> CalendarMonthResponse:
     if not MONTH_PATTERN.match(year_month):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Formato inválido. Usa YYYY-MM")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid format. Use YYYY-MM")
 
     year, month = map(int, year_month.split("-"))
     start_date = date(year, month, 1)
@@ -788,7 +899,7 @@ def month_calendar(
     product_cache: dict[int, Product] = {}
 
     for intake in intakes:
-        day = intake.created_at.astimezone(UTC).date()
+        day = _to_utc(intake.created_at).date()
         bucket = stats.setdefault(day, {"count": 0, "kcal": 0.0})
         bucket["count"] += 1
 
@@ -803,12 +914,8 @@ def month_calendar(
             bucket["kcal"] = round(bucket["kcal"] + nutrients["kcal"], 2)
 
     days = [
-        CalendarDayEntry(
-            date=day,
-            intake_count=int(values["count"]),
-            kcal=float(values["kcal"]),
-        )
-        for day, values in sorted(stats.items(), key=lambda item: item[0])
+        CalendarDayEntry(date=entry_day, intake_count=int(values["count"]), kcal=float(values["kcal"]))
+        for entry_day, values in sorted(stats.items(), key=lambda item: item[0])
     ]
 
     return CalendarMonthResponse(month=year_month, days=days)
