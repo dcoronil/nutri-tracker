@@ -2295,31 +2295,171 @@ function BodyProgressScreen() {
 function HistoryScreen() {
   const auth = useAuth();
   const [monthKey, setMonthKey] = useState(formatMonth(new Date()));
+  const [period, setPeriod] = useState<"week" | "month">("month");
+  const [onlyWithRecords, setOnlyWithRecords] = useState(true);
+  const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [days, setDays] = useState<CalendarDayEntry[]>([]);
+  const [dayDetailMap, setDayDetailMap] = useState<Record<string, DaySummary>>({});
+  const [weightDateMap, setWeightDateMap] = useState<Record<string, number>>({});
+  const [weeklyStats, setWeeklyStats] = useState<{
+    avgKcal: number;
+    avgProtein: number;
+    adherenceProteinPct: number;
+    streakDays: number;
+  } | null>(null);
   const [loading, setLoading] = useState(false);
+
+  const computeWeeklyStats = useCallback(async () => {
+    const today = new Date();
+    const rows: DaySummary[] = [];
+
+    for (let i = 0; i < 7; i += 1) {
+      const day = new Date(today);
+      day.setDate(today.getDate() - i);
+      const iso = formatDateLocal(day);
+      try {
+        const summary = await auth.fetchDaySummary(iso);
+        rows.push(summary);
+      } catch {
+        // Keep stats resilient for missing data.
+      }
+    }
+
+    if (rows.length === 0) {
+      setWeeklyStats(null);
+      return;
+    }
+
+    const avgKcal = rows.reduce((acc, row) => acc + row.consumed.kcal, 0) / rows.length;
+    const avgProtein = rows.reduce((acc, row) => acc + row.consumed.protein_g, 0) / rows.length;
+    const goalRows = rows.filter((row) => row.goal && row.goal.protein_goal > 0);
+    const adhered = goalRows.filter((row) => row.goal && row.consumed.protein_g >= row.goal.protein_goal * 0.95).length;
+    const adherenceProteinPct = goalRows.length ? (adhered / goalRows.length) * 100 : 0;
+
+    let streakDays = 0;
+    for (const row of rows) {
+      if (row.intakes.length > 0) {
+        streakDays += 1;
+      } else {
+        break;
+      }
+    }
+
+    setWeeklyStats({
+      avgKcal: Math.round(avgKcal),
+      avgProtein: Math.round(avgProtein * 10) / 10,
+      adherenceProteinPct: Math.round(adherenceProteinPct),
+      streakDays,
+    });
+  }, [auth]);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await auth.fetchCalendar(monthKey);
+      const [response, weights] = await Promise.all([auth.fetchCalendar(monthKey), auth.fetchWeightLogs(365)]);
       setDays(response.days);
+
+      const dateToWeight: Record<string, number> = {};
+      weights.forEach((row) => {
+        const day = row.created_at.slice(0, 10);
+        if (!dateToWeight[day]) {
+          dateToWeight[day] = row.weight_kg;
+        }
+      });
+      setWeightDateMap(dateToWeight);
+
+      const detailMap: Record<string, DaySummary> = {};
+      for (const day of response.days) {
+        if (day.intake_count === 0) {
+          continue;
+        }
+        try {
+          const detail = await auth.fetchDaySummary(day.date);
+          detailMap[day.date] = detail;
+        } catch {
+          // Keep rendering even if one day fails.
+        }
+      }
+      setDayDetailMap(detailMap);
+
+      await computeWeeklyStats();
     } catch (error) {
       Alert.alert("Historial", parseApiError(error));
     } finally {
       setLoading(false);
     }
-  }, [auth, monthKey]);
+  }, [auth, computeWeeklyStats, monthKey]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
+  const sortedDays = useMemo(() => [...days].sort((a, b) => b.date.localeCompare(a.date)), [days]);
+
+  const filteredDays = useMemo(() => {
+    const today = new Date();
+    const weekCutoff = new Date(today);
+    weekCutoff.setDate(today.getDate() - 6);
+
+    return sortedDays.filter((entry) => {
+      if (onlyWithRecords && entry.intake_count <= 0) {
+        return false;
+      }
+      if (period === "week") {
+        return new Date(entry.date) >= weekCutoff;
+      }
+      return true;
+    });
+  }, [onlyWithRecords, period, sortedDays]);
+
+  const selectedDetail = selectedDay ? dayDetailMap[selectedDay] : null;
+
   return (
     <SafeAreaView style={styles.screen}>
       <ScrollView contentContainerStyle={styles.mainScroll}>
-        <AppHeader title="History" subtitle="Resumen mensual de registros" />
+        <AppHeader title="History" subtitle="Actividad, adherencia y tendencias" />
 
-        <View style={styles.sectionCard}>
+        <AppCard>
+          <SectionHeader title="Métricas últimos 7 días" />
+          {weeklyStats ? (
+            <View style={styles.bodyStatsRow}>
+              <StatPill label="Prom kcal" value={`${weeklyStats.avgKcal}`} tone="accent" />
+              <StatPill label="Prom proteína" value={`${weeklyStats.avgProtein} g`} />
+              <StatPill label="Adherencia proteína" value={`${weeklyStats.adherenceProteinPct}%`} tone="warning" />
+              <StatPill label="Racha" value={`${weeklyStats.streakDays} días`} />
+            </View>
+          ) : (
+            <EmptyState title="Sin suficientes datos" subtitle="Registra varios días para activar estadísticas." />
+          )}
+        </AppCard>
+
+        <AppCard>
+          <SectionHeader title="Filtros" subtitle="Periodo y tipo de días" actionLabel="Recargar" onAction={() => void load()} />
+          <View style={styles.historyFilterRow}>
+            <Pressable
+              onPress={() => setPeriod("week")}
+              style={[styles.historyFilterChip, period === "week" && styles.historyFilterChipActive]}
+            >
+              <Text style={[styles.historyFilterText, period === "week" && styles.historyFilterTextActive]}>Semana</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => setPeriod("month")}
+              style={[styles.historyFilterChip, period === "month" && styles.historyFilterChipActive]}
+            >
+              <Text style={[styles.historyFilterText, period === "month" && styles.historyFilterTextActive]}>Mes</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => setOnlyWithRecords((current) => !current)}
+              style={[styles.historyFilterChip, onlyWithRecords && styles.historyFilterChipActive]}
+            >
+              <Text style={[styles.historyFilterText, onlyWithRecords && styles.historyFilterTextActive]}>
+                {onlyWithRecords ? "Con registros" : "Todos"}
+              </Text>
+            </Pressable>
+          </View>
+        </AppCard>
+
+        <AppCard>
           <View style={styles.calendarHeader}>
             <Pressable onPress={() => setMonthKey((current) => moveMonth(current, -1))} style={styles.calendarNavBtn}>
               <Text style={styles.calendarNavText}>{"<"}</Text>
@@ -2331,17 +2471,55 @@ function HistoryScreen() {
           </View>
 
           {loading ? <ActivityIndicator color={theme.accent} /> : null}
+          {filteredDays.length === 0 && !loading ? (
+            <EmptyState title="Sin días para mostrar" subtitle="Cambia filtros o registra más comidas." />
+          ) : null}
 
-          {days.length === 0 && !loading ? <Text style={styles.helperText}>Sin registros en este mes.</Text> : null}
+          {filteredDays.map((entry) => {
+            const detail = dayDetailMap[entry.date];
+            const dayWeight = weightDateMap[entry.date];
+            return (
+              <Pressable key={entry.date} style={styles.historyDayCard} onPress={() => setSelectedDay(entry.date)}>
+                <View style={styles.historyDayHead}>
+                  <Text style={styles.historyDate}>{entry.date}</Text>
+                  <Text style={styles.historyValue}>{Math.round(entry.kcal)} kcal</Text>
+                </View>
+                <Text style={styles.helperText}>{entry.intake_count} registros</Text>
+                <Text style={styles.helperText}>
+                  P {Math.round(detail?.consumed.protein_g ?? 0)} / C {Math.round(detail?.consumed.carbs_g ?? 0)} / G{" "}
+                  {Math.round(detail?.consumed.fat_g ?? 0)}
+                </Text>
+                <Text style={styles.helperText}>
+                  Peso: {typeof dayWeight === "number" ? `${dayWeight.toFixed(1)} kg` : "sin dato"}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </AppCard>
 
-          {days.map((entry) => (
-            <View key={entry.date} style={styles.historyRow}>
-              <Text style={styles.historyDate}>{entry.date}</Text>
-              <Text style={styles.historyValue}>{entry.intake_count} intakes</Text>
-              <Text style={styles.historyValue}>{Math.round(entry.kcal)} kcal</Text>
-            </View>
-          ))}
-        </View>
+        {selectedDay ? (
+          <AppCard>
+            <SectionHeader title={`Detalle ${selectedDay}`} />
+            {selectedDetail ? (
+              <>
+                <Text style={styles.helperText}>
+                  Kcal {Math.round(selectedDetail.consumed.kcal)} | Proteína {Math.round(selectedDetail.consumed.protein_g)} g | Carbs{" "}
+                  {Math.round(selectedDetail.consumed.carbs_g)} g | Grasas {Math.round(selectedDetail.consumed.fat_g)} g
+                </Text>
+                {selectedDetail.intakes.map((intake) => (
+                  <View key={intake.id} style={styles.historyIntakeRow}>
+                    <Text style={styles.historyValue}>{intake.product_name ?? "Producto"}</Text>
+                    <Text style={styles.helperText}>
+                      {Math.round(intake.quantity_g ?? 0)} g · {Math.round(intake.nutrients.kcal)} kcal
+                    </Text>
+                  </View>
+                ))}
+              </>
+            ) : (
+              <Text style={styles.helperText}>No hay detalle disponible para este día.</Text>
+            )}
+          </AppCard>
+        ) : null}
       </ScrollView>
     </SafeAreaView>
   );
@@ -3696,6 +3874,54 @@ const styles = StyleSheet.create({
     backgroundColor: theme.panelSoft,
     paddingHorizontal: 12,
     paddingVertical: 10,
+  },
+  historyFilterRow: {
+    flexDirection: "row",
+    gap: 8,
+    flexWrap: "wrap",
+  },
+  historyFilterChip: {
+    borderWidth: 1,
+    borderColor: theme.border,
+    borderRadius: 999,
+    backgroundColor: theme.panelSoft,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  historyFilterChipActive: {
+    borderColor: theme.accent,
+    backgroundColor: theme.accentSoft,
+  },
+  historyFilterText: {
+    color: theme.muted,
+    fontWeight: "700",
+    fontSize: 12,
+  },
+  historyFilterTextActive: {
+    color: theme.text,
+  },
+  historyDayCard: {
+    borderWidth: 1,
+    borderColor: theme.border,
+    borderRadius: 14,
+    padding: 12,
+    backgroundColor: theme.panelSoft,
+    gap: 4,
+  },
+  historyDayHead: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  historyIntakeRow: {
+    borderWidth: 1,
+    borderColor: theme.border,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    backgroundColor: theme.panelSoft,
+    gap: 2,
   },
   historyDate: {
     color: theme.text,
