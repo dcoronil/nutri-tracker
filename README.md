@@ -1,21 +1,21 @@
 # Nutri Tracker MVP
 
-MVP funcional para tracking nutricional personal con flujo completo:
+App personal de tracking nutricional con monorepo:
 
-- Escaneo EAN/UPC (mobile)
-- Búsqueda local en Postgres + fallback OpenFoodFacts
-- Importación automática si hay nutrición suficiente
-- Captura de etiqueta (foto + OCR opcional + preguntas de validación)
-- Registro de intakes
-- Dashboard diario con objetivos y restante
+- `apps/mobile`: Expo React Native (dark UI, escáner de barcode, dashboard gráfico)
+- `services/api`: FastAPI + SQLModel + Alembic + pytest
+- `infra`: Postgres con Docker Compose
 
-## Estructura
+## Qué hace ahora
 
-```text
-/apps/mobile   # React Native Expo
-/services/api  # FastAPI + SQLModel + Alembic + pytest
-/infra         # docker-compose para Postgres
-```
+- Registro/login con verificación por código de email
+- Perfil corporal por usuario (peso, altura, edad, sexo, actividad, objetivo)
+- Cálculo de IMC y % grasa estimado (medidas opcionales)
+- Recomendación de objetivos y feedback de realismo
+- Escaneo EAN/UPC solo con cámara (sin input manual)
+- Importación local/OpenFoodFacts + creación por etiqueta
+- Registro de consumo por gramos/% paquete/unidades
+- Dashboard con donut de macros y calendario de registros
 
 ## Requisitos
 
@@ -24,93 +24,72 @@ MVP funcional para tracking nutricional personal con flujo completo:
 - Node 20+
 - npm 10+
 
-## Levantar con Make (recomendado)
+## Arranque rápido (Make)
 
 ```bash
+cd /home/daniel/Documentos/nutri-tracker
+cp .env.example .env
+make reset-db
 make setup
 ```
 
 Luego en dos terminales:
 
+Terminal 1 (API):
 ```bash
 make api-dev
 ```
 
+Terminal 2 (Expo):
 ```bash
 make mobile-start
 ```
 
-Comandos útiles:
+## Configuración de móvil físico
 
-- `make up` / `make down` (Postgres)
-- `make reset-db` (borra volumen y recrea Postgres)
-- `make api-migrate` (migraciones)
-- `make api-test` y `make api-lint`
-- `make logs` (logs de Postgres)
+En `apps/mobile/.env` usa tu IP local (no `localhost`):
 
-## 1) Variables de entorno
-
-Copia el ejemplo raíz:
-
-```bash
-cp .env.example .env
+```env
+EXPO_PUBLIC_API_BASE_URL=http://TU_IP_LOCAL:8000
 ```
 
-Opcionalmente, usa los ejemplos por servicio:
+## Flujo recomendado en la app
 
-- `services/api/.env.example`
-- `apps/mobile/.env.example`
+1. Crear cuenta en `Registro`.
+2. Verificar código en `Verificar` (si no hay SMTP, en dev aparece código temporal).
+3. Entrar y revisar `Perfil` (IMC/% grasa + recomendación).
+4. Ir a `Escanear` y usar cámara con marco de enfoque.
+5. Registrar cantidad en modal post-escaneo.
+6. Revisar `Dashboard` (donut + calendario + objetivos).
 
-## 2) Levantar Postgres
+## Variables de entorno nuevas (API)
 
-```bash
-cd infra
-docker compose up -d
-```
+- `AUTH_SECRET_KEY`
+- `AUTH_TOKEN_TTL_HOURS`
+- `VERIFICATION_CODE_TTL_MINUTES`
+- `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL`, `SMTP_USE_TLS`
+- `EXPOSE_VERIFICATION_CODE` (true en desarrollo)
 
-## 3) Backend (FastAPI)
+## Endpoints principales
 
-```bash
-cd services/api
-python3 -m pip install --break-system-packages -e '.[dev]'
-export $(grep -v '^#' ../../.env | xargs)
-alembic upgrade head
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-```
-
-Endpoints disponibles:
-
-- `GET /health`
+- `POST /auth/register`
+- `POST /auth/resend-code`
+- `POST /auth/verify-email`
+- `POST /auth/login`
+- `GET /me/profile`
+- `PUT /me/profile`
+- `GET /me/analysis`
 - `GET /products/by_barcode/{ean}`
 - `POST /products/from_label_photo`
 - `POST /intakes`
 - `GET /days/{yyyy-mm-dd}/summary`
 - `POST /goals/{yyyy-mm-dd}`
+- `GET /calendar/{yyyy-mm}`
 
-## 4) Mobile (Expo)
-
-```bash
-cd apps/mobile
-npm install
-cp .env.example .env
-npm run start
-```
-
-Si corres Expo en emulador Android, normalmente conviene usar `EXPO_PUBLIC_API_BASE_URL=http://10.0.2.2:8000`.
-
-## 5) Tests y lint backend
+## Validación backend
 
 ```bash
 cd services/api
 python3 -m pytest -q
 python3 -m ruff check .
 ```
-
-## Notas del flujo de etiqueta
-
-- `POST /products/from_label_photo` acepta `multipart/form-data` con:
-  - `barcode`, `name`, `brand`
-  - `label_text` (OCR manual/opcional)
-  - `photos` (lista de imágenes)
-- Si faltan campos críticos (`kcal`, `protein_g`, `fat_g`, `carbs_g`, `nutrition_basis`), la API devuelve `questions` para completar desde el cliente.
-- OCR con `pytesseract` es opcional y depende de tener instalado el binario `tesseract` en el sistema.

@@ -11,6 +11,17 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://nutri:nutri@localhost:5432/nutri_tracker"
     openfoodfacts_base_url: str = "https://world.openfoodfacts.org/api/v2"
     ocr_lang: str = "eng+spa"
+    auth_secret_key: str = "change-me-in-production"
+    auth_token_ttl_hours: int = 720
+    verification_code_ttl_minutes: int = 15
+
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_user: str | None = None
+    smtp_password: str | None = None
+    smtp_from_email: str = "no-reply@nutri-tracker.local"
+    smtp_use_tls: bool = True
+    expose_verification_code: bool = True
 
 
 @lru_cache

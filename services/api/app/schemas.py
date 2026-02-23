@@ -5,7 +5,81 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
-from app.models import IntakeMethod, NutritionBasis
+from app.models import ActivityLevel, GoalType, IntakeMethod, NutritionBasis, Sex
+
+
+class UserRead(BaseModel):
+    id: int
+    email: str
+    is_verified: bool
+
+
+class ProfileInput(BaseModel):
+    weight_kg: float = Field(gt=0)
+    height_cm: float = Field(gt=0)
+    age: int = Field(ge=13, le=120)
+    sex: Sex
+    activity_level: ActivityLevel = ActivityLevel.moderate
+    goal_type: GoalType = GoalType.maintain
+
+    waist_cm: float | None = Field(default=None, gt=0)
+    neck_cm: float | None = Field(default=None, gt=0)
+    hip_cm: float | None = Field(default=None, gt=0)
+    chest_cm: float | None = Field(default=None, gt=0)
+    arm_cm: float | None = Field(default=None, gt=0)
+    thigh_cm: float | None = Field(default=None, gt=0)
+
+
+class ProfileUpdate(ProfileInput):
+    pass
+
+
+class ProfileRead(ProfileInput):
+    bmi: float
+    bmi_category: str
+    bmi_color: str
+    body_fat_percent: float | None
+    body_fat_category: str
+    body_fat_color: str
+
+
+class RegisterRequest(ProfileInput):
+    email: str = Field(min_length=5, max_length=255)
+    password: str = Field(min_length=8, max_length=128)
+
+
+class RegisterResponse(BaseModel):
+    user_id: int
+    email: str
+    verification_required: bool
+    message: str
+    debug_verification_code: str | None = None
+
+
+class VerifyEmailRequest(BaseModel):
+    email: str
+    code: str = Field(min_length=4, max_length=12)
+
+
+class EmailRequest(BaseModel):
+    email: str
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str = Field(min_length=8, max_length=128)
+
+
+class AuthResponse(BaseModel):
+    access_token: str
+    token_type: Literal["bearer"] = "bearer"
+    user: UserRead
+    profile: ProfileRead
+
+
+class GoalFeedback(BaseModel):
+    realistic: bool
+    notes: list[str] = Field(default_factory=list)
 
 
 class ProductRead(BaseModel):
@@ -90,6 +164,7 @@ class IntakeNutrients(BaseModel):
 class IntakeRead(BaseModel):
     id: int
     product_id: int
+    product_name: str | None = None
     method: IntakeMethod
     quantity_g: float | None
     quantity_units: float | None
@@ -107,9 +182,30 @@ class DailyGoalUpsert(BaseModel):
     carbs_goal: float = Field(gt=0)
 
 
+class DailyGoalResponse(DailyGoalUpsert):
+    feedback: GoalFeedback
+
+
 class DaySummary(BaseModel):
     date: date
     goal: DailyGoalUpsert | None = None
     consumed: IntakeNutrients
     remaining: IntakeNutrients | None = None
     intakes: list[IntakeRead]
+
+
+class ProfileAnalysisResponse(BaseModel):
+    profile: ProfileRead
+    recommended_goal: DailyGoalUpsert
+    goal_feedback_today: GoalFeedback | None = None
+
+
+class CalendarDayEntry(BaseModel):
+    date: date
+    intake_count: int
+    kcal: float
+
+
+class CalendarMonthResponse(BaseModel):
+    month: str
+    days: list[CalendarDayEntry]
