@@ -15,6 +15,7 @@ from app.models import (
     DailyGoal,
     EmailOTP,
     Intake,
+    IntakeMethod,
     NutritionBasis,
     Product,
     UserAccount,
@@ -40,6 +41,8 @@ from app.schemas import (
     IntakeRead,
     LabelPhotoResponse,
     LoginRequest,
+    MealEstimateQuestionsResponse,
+    MealPhotoEstimateResponse,
     MeResponse,
     NutritionExtract,
     ProductCorrectionResponse,
@@ -78,6 +81,7 @@ from app.services.body_metrics import (
     weekly_weight_change,
 )
 from app.services.email import EmailSendError, send_verification_email
+from app.services.meal_estimate import estimate_meal
 from app.services.nutrition import (
     IntakeComputationError,
     coherence_questions,
@@ -1077,6 +1081,161 @@ async def correct_product_by_barcode_from_label_photo(
     )
 
 
+@router.post("/meal-photo-estimate/questions", response_model=MealEstimateQuestionsResponse)
+async def meal_photo_estimate_questions(
+    current_user: Annotated[UserAccount, Depends(get_ready_user)],
+    description: Annotated[str, Form()],
+    portion_size: Annotated[str | None, Form()] = None,
+    has_added_fats: Annotated[bool | None, Form()] = None,
+    quantity_note: Annotated[str | None, Form()] = None,
+    photos: Annotated[list[UploadFile] | None, File()] = None,
+) -> MealEstimateQuestionsResponse:
+    del current_user
+    normalized_portion = portion_size if portion_size in {"small", "medium", "large"} else None
+    result = estimate_meal(
+        description=description,
+        portion_size=normalized_portion,  # type: ignore[arg-type]
+        has_added_fats=has_added_fats,
+        quantity_note=quantity_note,
+        photo_count=len(photos or []),
+        adjust_percent=0,
+    )
+    return MealEstimateQuestionsResponse(
+        questions=result["questions"],  # type: ignore[arg-type]
+        assumptions=result["assumptions"],  # type: ignore[arg-type]
+        detected_ingredients=result["detected_ingredients"],  # type: ignore[arg-type]
+    )
+
+
+@router.post("/intakes/from-meal-photo-estimate", response_model=MealPhotoEstimateResponse)
+async def intake_from_meal_photo_estimate(
+    current_user: Annotated[UserAccount, Depends(get_ready_user)],
+    session: Annotated[Session, Depends(get_session)],
+    description: Annotated[str, Form()],
+    portion_size: Annotated[str | None, Form()] = None,
+    has_added_fats: Annotated[bool | None, Form()] = None,
+    quantity_note: Annotated[str | None, Form()] = None,
+    adjust_percent: Annotated[int, Form()] = 0,
+    commit: Annotated[bool, Form()] = False,
+    photos: Annotated[list[UploadFile] | None, File()] = None,
+) -> MealPhotoEstimateResponse:
+    normalized_portion = portion_size if portion_size in {"small", "medium", "large"} else None
+    normalized_adjust = max(-30, min(30, adjust_percent))
+    result = estimate_meal(
+        description=description,
+        portion_size=normalized_portion,  # type: ignore[arg-type]
+        has_added_fats=has_added_fats,
+        quantity_note=quantity_note,
+        photo_count=len(photos or []),
+        adjust_percent=normalized_adjust,
+    )
+
+    nutrition = result["nutrition"]  # type: ignore[assignment]
+    preview_nutrients = {
+        "kcal": float(nutrition["kcal"]),
+        "protein_g": float(nutrition["protein_g"]),
+        "fat_g": float(nutrition["fat_g"]),
+        "sat_fat_g": float(nutrition.get("sat_fat_g") or 0.0),
+        "carbs_g": float(nutrition["carbs_g"]),
+        "sugars_g": float(nutrition.get("sugars_g") or 0.0),
+        "fiber_g": float(nutrition.get("fiber_g") or 0.0),
+        "salt_g": float(nutrition.get("salt_g") or 0.0),
+    }
+
+    response_base = {
+        "saved": False,
+        "confidence_level": result["confidence_level"],
+        "assumptions": result["assumptions"],
+        "questions": result["questions"],
+        "detected_ingredients": result["detected_ingredients"],
+        "preview_nutrients": preview_nutrients,
+        "intake": None,
+    }
+    if not commit:
+        return MealPhotoEstimateResponse.model_validate(response_base)
+
+    serving_size = {
+        "small": 200.0,
+        "medium": 280.0,
+        "large": 360.0,
+    }.get(normalized_portion or "medium", 280.0)
+    if quantity_note:
+        match = re.search(r"(\\d+(?:[\\.,]\\d+)?)", quantity_note)
+        if match:
+            try:
+                qty_factor = float(match.group(1).replace(",", "."))
+                serving_size = max(120.0, min(620.0, serving_size * max(0.5, min(qty_factor, 2.0))))
+            except ValueError:
+                pass
+
+    product_name = description.strip()
+    if not product_name:
+        product_name = "Comida estimada"
+
+    product = Product(
+        barcode=None,
+        name=f"Estimación: {product_name[:72]}",
+        brand=None,
+        image_url=None,
+        nutrition_basis=NutritionBasis.per_serving,
+        serving_size_g=serving_size,
+        net_weight_g=serving_size,
+        kcal=preview_nutrients["kcal"],
+        protein_g=preview_nutrients["protein_g"],
+        fat_g=preview_nutrients["fat_g"],
+        sat_fat_g=preview_nutrients["sat_fat_g"],
+        carbs_g=preview_nutrients["carbs_g"],
+        sugars_g=preview_nutrients["sugars_g"],
+        fiber_g=preview_nutrients["fiber_g"],
+        salt_g=preview_nutrients["salt_g"],
+        source="photo_estimate",
+        is_verified=False,
+        verified_at=None,
+        data_confidence=f"estimate_{result['confidence_level']}",
+    )
+    session.add(product)
+    session.flush()
+
+    intake = Intake(
+        user_id=current_user.id,
+        product_id=product.id,
+        quantity_g=serving_size,
+        quantity_units=1,
+        percent_pack=None,
+        method=IntakeMethod.units,
+        estimated=True,
+        estimate_confidence=result["confidence_level"],  # type: ignore[arg-type]
+        user_description=description.strip(),
+        source_method="meal_photo",
+        created_at=datetime.now(UTC),
+    )
+    session.add(intake)
+    session.commit()
+    session.refresh(product)
+    session.refresh(intake)
+
+    nutrients = nutrients_for_quantity(product, serving_size)
+    intake_payload = IntakeRead(
+        id=intake.id,
+        product_id=intake.product_id,
+        product_name=product.name,
+        method=intake.method,
+        quantity_g=intake.quantity_g,
+        quantity_units=intake.quantity_units,
+        percent_pack=intake.percent_pack,
+        created_at=intake.created_at,
+        estimated=intake.estimated,
+        estimate_confidence=intake.estimate_confidence,
+        user_description=intake.user_description,
+        source_method=intake.source_method,
+        nutrients=nutrients,
+    )
+
+    response_base["saved"] = True
+    response_base["intake"] = intake_payload
+    return MealPhotoEstimateResponse.model_validate(response_base)
+
+
 @router.post("/intakes", response_model=IntakeRead)
 def create_intake(
     payload: IntakeCreate,
@@ -1145,6 +1304,10 @@ def create_intake(
         quantity_units=intake.quantity_units,
         percent_pack=intake.percent_pack,
         created_at=intake.created_at,
+        estimated=intake.estimated,
+        estimate_confidence=intake.estimate_confidence,
+        user_description=intake.user_description,
+        source_method=intake.source_method,
         nutrients=nutrients,
     )
 
@@ -1190,6 +1353,10 @@ def _day_summary(
                 quantity_units=intake.quantity_units,
                 percent_pack=intake.percent_pack,
                 created_at=intake.created_at,
+                estimated=intake.estimated,
+                estimate_confidence=intake.estimate_confidence,
+                user_description=intake.user_description,
+                source_method=intake.source_method,
                 nutrients=nutrients,
             )
         )

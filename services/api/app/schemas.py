@@ -258,6 +258,10 @@ class IntakeRead(BaseModel):
     quantity_units: float | None
     percent_pack: float | None
     created_at: datetime
+    estimated: bool = False
+    estimate_confidence: str | None = None
+    user_description: str | None = None
+    source_method: str = "barcode"
     nutrients: IntakeNutrients
 
 
@@ -273,6 +277,22 @@ class ProfileAnalysisResponse(BaseModel):
     profile: ProfileRead
     recommended_goal: DailyGoalUpsert
     goal_feedback_today: GoalFeedback | None = None
+
+
+class MealEstimateQuestionsResponse(BaseModel):
+    questions: list[str] = Field(default_factory=list)
+    assumptions: list[str] = Field(default_factory=list)
+    detected_ingredients: list[str] = Field(default_factory=list)
+
+
+class MealPhotoEstimateResponse(BaseModel):
+    saved: bool
+    confidence_level: Literal["high", "medium", "low"]
+    assumptions: list[str] = Field(default_factory=list)
+    questions: list[str] = Field(default_factory=list)
+    detected_ingredients: list[str] = Field(default_factory=list)
+    preview_nutrients: IntakeNutrients
+    intake: IntakeRead | None = None
 
 
 class CalendarDayEntry(BaseModel):

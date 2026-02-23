@@ -138,6 +138,10 @@ class Intake(SQLModel, table=True):
     quantity_units: float | None = Field(default=None, ge=0)
     percent_pack: float | None = Field(default=None, ge=0, le=100)
     method: IntakeMethod = Field(default=IntakeMethod.grams)
+    estimated: bool = Field(default=False)
+    estimate_confidence: str | None = Field(default=None, max_length=16)
+    user_description: str | None = Field(default=None, max_length=1024)
+    source_method: str = Field(default="barcode", max_length=32)
     created_at: datetime = Field(default_factory=utcnow, index=True)
 
 

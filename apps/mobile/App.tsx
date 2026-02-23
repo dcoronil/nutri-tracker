@@ -192,6 +192,12 @@ type ProductCorrectionResponse = {
   message: string;
 };
 
+type MealEstimateQuestionsResponse = {
+  questions: string[];
+  assumptions: string[];
+  detected_ingredients: string[];
+};
+
 type Nutrients = {
   kcal: number;
   protein_g: number;
@@ -212,7 +218,21 @@ type Intake = {
   quantity_units: number | null;
   percent_pack: number | null;
   created_at: string;
+  estimated?: boolean;
+  estimate_confidence?: string | null;
+  user_description?: string | null;
+  source_method?: string;
   nutrients: Nutrients;
+};
+
+type MealPhotoEstimateResponse = {
+  saved: boolean;
+  confidence_level: "high" | "medium" | "low";
+  assumptions: string[];
+  questions: string[];
+  detected_ingredients: string[];
+  preview_nutrients: Nutrients;
+  intake: Intake | null;
 };
 
 type DaySummary = {
@@ -331,6 +351,22 @@ type AuthContextValue = {
     photos: string[];
     confirmUpdate?: boolean;
   }) => Promise<ProductCorrectionResponse>;
+  mealEstimateQuestions: (input: {
+    description: string;
+    portionSize?: "small" | "medium" | "large";
+    hasAddedFats?: boolean;
+    quantityNote?: string;
+    photos: string[];
+  }) => Promise<MealEstimateQuestionsResponse>;
+  mealPhotoEstimate: (input: {
+    description: string;
+    portionSize?: "small" | "medium" | "large";
+    hasAddedFats?: boolean;
+    quantityNote?: string;
+    photos: string[];
+    adjustPercent?: number;
+    commit?: boolean;
+  }) => Promise<MealPhotoEstimateResponse>;
   createIntake: (payload: {
     product_id: number;
     method: IntakeMethod;
@@ -949,6 +985,90 @@ function AuthProvider({ children }: { children: import("react").ReactNode }) {
     [request],
   );
 
+  const mealEstimateQuestions = useCallback(
+    async (input: {
+      description: string;
+      portionSize?: "small" | "medium" | "large";
+      hasAddedFats?: boolean;
+      quantityNote?: string;
+      photos: string[];
+    }): Promise<MealEstimateQuestionsResponse> => {
+      const form = new FormData();
+      form.append("description", input.description.trim());
+      if (input.portionSize) {
+        form.append("portion_size", input.portionSize);
+      }
+      if (typeof input.hasAddedFats === "boolean") {
+        form.append("has_added_fats", String(input.hasAddedFats));
+      }
+      if (input.quantityNote?.trim()) {
+        form.append("quantity_note", input.quantityNote.trim());
+      }
+      input.photos.forEach((uri, index) => {
+        const name = uri.split("/").pop() || `meal-${index + 1}.jpg`;
+        form.append(
+          "photos",
+          {
+            uri,
+            name,
+            type: "image/jpeg",
+          } as unknown as Blob,
+        );
+      });
+      return request<MealEstimateQuestionsResponse>("/meal-photo-estimate/questions", {
+        method: "POST",
+        body: form,
+      });
+    },
+    [request],
+  );
+
+  const mealPhotoEstimate = useCallback(
+    async (input: {
+      description: string;
+      portionSize?: "small" | "medium" | "large";
+      hasAddedFats?: boolean;
+      quantityNote?: string;
+      photos: string[];
+      adjustPercent?: number;
+      commit?: boolean;
+    }): Promise<MealPhotoEstimateResponse> => {
+      const form = new FormData();
+      form.append("description", input.description.trim());
+      if (input.portionSize) {
+        form.append("portion_size", input.portionSize);
+      }
+      if (typeof input.hasAddedFats === "boolean") {
+        form.append("has_added_fats", String(input.hasAddedFats));
+      }
+      if (input.quantityNote?.trim()) {
+        form.append("quantity_note", input.quantityNote.trim());
+      }
+      if (typeof input.adjustPercent === "number") {
+        form.append("adjust_percent", String(Math.round(input.adjustPercent)));
+      }
+      if (input.commit) {
+        form.append("commit", "true");
+      }
+      input.photos.forEach((uri, index) => {
+        const name = uri.split("/").pop() || `meal-estimate-${index + 1}.jpg`;
+        form.append(
+          "photos",
+          {
+            uri,
+            name,
+            type: "image/jpeg",
+          } as unknown as Blob,
+        );
+      });
+      return request<MealPhotoEstimateResponse>("/intakes/from-meal-photo-estimate", {
+        method: "POST",
+        body: form,
+      });
+    },
+    [request],
+  );
+
   const createIntake = useCallback(
     async (payload: {
       product_id: number;
@@ -1032,6 +1152,8 @@ function AuthProvider({ children }: { children: import("react").ReactNode }) {
       lookupByBarcode,
       createProductFromLabel,
       correctProductFromLabel,
+      mealEstimateQuestions,
+      mealPhotoEstimate,
       createIntake,
       fetchBodySummary,
       fetchWeightLogs,
@@ -1050,6 +1172,8 @@ function AuthProvider({ children }: { children: import("react").ReactNode }) {
       createWeightLog,
       createProductFromLabel,
       correctProductFromLabel,
+      mealEstimateQuestions,
+      mealPhotoEstimate,
       fetchAnalysis,
       fetchBodySummary,
       fetchCalendar,
@@ -3092,6 +3216,14 @@ function AddScreen() {
 
   const [mealDescription, setMealDescription] = useState("");
   const [mealPhotos, setMealPhotos] = useState<string[]>([]);
+  const [mealPortion, setMealPortion] = useState<"" | "small" | "medium" | "large">("");
+  const [mealAddedFat, setMealAddedFat] = useState<"unknown" | "yes" | "no">("unknown");
+  const [mealQuantityNote, setMealQuantityNote] = useState("");
+  const [mealAdjust, setMealAdjust] = useState(0);
+  const [mealQuestions, setMealQuestions] = useState<string[]>([]);
+  const [mealAssumptions, setMealAssumptions] = useState<string[]>([]);
+  const [mealIngredients, setMealIngredients] = useState<string[]>([]);
+  const [mealPreview, setMealPreview] = useState<MealPhotoEstimateResponse | null>(null);
 
   const [manualName, setManualName] = useState("");
   const [manualBrand, setManualBrand] = useState("");
@@ -3186,6 +3318,14 @@ function AddScreen() {
     resetScanState();
     setMealDescription("");
     setMealPhotos([]);
+    setMealPortion("");
+    setMealAddedFat("unknown");
+    setMealQuantityNote("");
+    setMealAdjust(0);
+    setMealQuestions([]);
+    setMealAssumptions([]);
+    setMealIngredients([]);
+    setMealPreview(null);
     setMode("meal_photo");
   };
 
@@ -3309,7 +3449,91 @@ function AddScreen() {
     if (!firstAsset?.uri) {
       return;
     }
+    setMealPreview(null);
     setMealPhotos((current) => [...current, firstAsset.uri]);
+  };
+
+  const mealAddedFatFlag = mealAddedFat === "unknown" ? undefined : mealAddedFat === "yes";
+
+  const runMealQuestions = async () => {
+    if (!mealDescription.trim()) {
+      Alert.alert("Estimación", "Añade una descripción breve de la comida.");
+      return;
+    }
+    setSaving(true);
+    try {
+      const response = await auth.mealEstimateQuestions({
+        description: mealDescription.trim(),
+        portionSize: mealPortion || undefined,
+        hasAddedFats: mealAddedFatFlag,
+        quantityNote: mealQuantityNote.trim() || undefined,
+        photos: mealPhotos,
+      });
+      setMealQuestions(response.questions);
+      setMealAssumptions(response.assumptions);
+      setMealIngredients(response.detected_ingredients);
+    } catch (error) {
+      Alert.alert("Estimación", parseApiError(error));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const runMealPreview = async (adjustPercent = mealAdjust) => {
+    if (!mealDescription.trim()) {
+      Alert.alert("Estimación", "Añade una descripción breve de la comida.");
+      return;
+    }
+    setSaving(true);
+    try {
+      const response = await auth.mealPhotoEstimate({
+        description: mealDescription.trim(),
+        portionSize: mealPortion || undefined,
+        hasAddedFats: mealAddedFatFlag,
+        quantityNote: mealQuantityNote.trim() || undefined,
+        photos: mealPhotos,
+        adjustPercent,
+        commit: false,
+      });
+      setMealPreview(response);
+      setMealQuestions(response.questions);
+      setMealAssumptions(response.assumptions);
+      setMealIngredients(response.detected_ingredients);
+      setMealAdjust(adjustPercent);
+    } catch (error) {
+      Alert.alert("Estimación", parseApiError(error));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const saveMealEstimate = async () => {
+    if (!mealDescription.trim()) {
+      Alert.alert("Estimación", "Añade una descripción breve de la comida.");
+      return;
+    }
+    setSaving(true);
+    try {
+      const response = await auth.mealPhotoEstimate({
+        description: mealDescription.trim(),
+        portionSize: mealPortion || undefined,
+        hasAddedFats: mealAddedFatFlag,
+        quantityNote: mealQuantityNote.trim() || undefined,
+        photos: mealPhotos,
+        adjustPercent: mealAdjust,
+        commit: true,
+      });
+      if (!response.saved || !response.intake) {
+        Alert.alert("Estimación", "No se pudo guardar. Revisa las preguntas sugeridas.");
+        return;
+      }
+      Alert.alert("Estimación", "Comida estimada guardada correctamente.");
+      resetToHub();
+    } catch (error) {
+      Alert.alert("Estimación", parseApiError(error));
+    } finally {
+      setSaving(false);
+    }
   };
 
   const createFromLabel = async () => {
@@ -3526,7 +3750,7 @@ function AddScreen() {
         : mode === "label_fix"
           ? "Corregir o añadir datos nutricionales por etiqueta"
           : mode === "meal_photo"
-            ? "Estimación guiada de plato (en el siguiente bloque)"
+            ? "Estimación guiada de plato por foto + descripción"
             : "Carga manual rápida de producto";
 
   const showLabelForm = mode === "label_fix" || (mode === "barcode" && phase === "label");
@@ -3710,22 +3934,111 @@ function AddScreen() {
             <View style={styles.sectionCard}>
               <Text style={styles.sectionTitle}>Estimar comida por foto</Text>
               <Text style={styles.helperText}>
-                Captura una foto del plato y añade una descripción breve. En el siguiente bloque se conectará a la estimación
-                backend conservadora.
+                Estimación conservadora: kcal/grasas al alza y proteína/fibra a la baja. Revisa el preview y confirma antes de guardar.
               </Text>
               <InputField
                 label="Descripción (recomendada)"
                 value={mealDescription}
-                onChangeText={setMealDescription}
+                onChangeText={(value) => {
+                  setMealDescription(value);
+                  setMealPreview(null);
+                }}
                 placeholder="Ej: arroz con pollo y mayonesa"
               />
+              <InputField
+                label="Cantidad aproximada (opcional)"
+                value={mealQuantityNote}
+                onChangeText={(value) => {
+                  setMealQuantityNote(value);
+                  setMealPreview(null);
+                }}
+                placeholder="Ej: 1 plato / 2 cucharadas"
+              />
+
+              <Text style={styles.fieldLabel}>Tamaño de ración</Text>
+              <View style={styles.methodRow}>
+                {(["small", "medium", "large"] as const).map((portion) => (
+                  <Pressable
+                    key={portion}
+                    style={[styles.methodChip, mealPortion === portion && styles.methodChipActive]}
+                    onPress={() => {
+                      setMealPortion(portion);
+                      setMealPreview(null);
+                    }}
+                  >
+                    <Text style={[styles.methodChipText, mealPortion === portion && styles.methodChipTextActive]}>
+                      {portion === "small" ? "Pequeña" : portion === "medium" ? "Media" : "Grande"}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+
+              <Text style={styles.fieldLabel}>¿Aceites/salsas añadidas?</Text>
+              <View style={styles.methodRow}>
+                {([
+                  ["unknown", "No sé"],
+                  ["yes", "Sí"],
+                  ["no", "No"],
+                ] as const).map(([value, label]) => (
+                  <Pressable
+                    key={value}
+                    style={[styles.methodChip, mealAddedFat === value && styles.methodChipActive]}
+                    onPress={() => {
+                      setMealAddedFat(value);
+                      setMealPreview(null);
+                    }}
+                  >
+                    <Text style={[styles.methodChipText, mealAddedFat === value && styles.methodChipTextActive]}>{label}</Text>
+                  </Pressable>
+                ))}
+              </View>
+
               <SecondaryButton title="Tomar foto de comida" onPress={() => void captureMealPhoto()} />
               <Text style={styles.helperText}>{mealPhotos.length} foto(s) adjuntas</Text>
-              <PrimaryButton
-                title="Continuar con estimación"
-                onPress={() => Alert.alert("Estimación", "Se habilita en el siguiente bloque (backend + confirmación).")}
-              />
-              <SecondaryButton title="Volver" onPress={resetToHub} />
+
+              <PrimaryButton title="Generar preguntas" onPress={() => void runMealQuestions()} loading={saving} />
+              <SecondaryButton title="Previsualizar estimación" onPress={() => void runMealPreview()} disabled={saving} />
+
+              {mealIngredients.length > 0 ? (
+                <Text style={styles.helperText}>Ingredientes detectados: {mealIngredients.join(", ")}</Text>
+              ) : null}
+              {mealQuestions.map((question) => (
+                <Text key={question} style={styles.helperText}>
+                  - {question}
+                </Text>
+              ))}
+              {mealAssumptions.map((assumption) => (
+                <Text key={assumption} style={styles.helperText}>
+                  · {assumption}
+                </Text>
+              ))}
+
+              {mealPreview ? (
+                <AppCard style={styles.previewCard}>
+                  <SectionHeader title="Preview estimado" subtitle={`Confianza: ${mealPreview.confidence_level}`} />
+                  <View style={styles.previewRow}>
+                    <StatPill label="kcal" value={`${Math.round(mealPreview.preview_nutrients.kcal)}`} tone="warning" />
+                    <StatPill label="prote" value={`${Math.round(mealPreview.preview_nutrients.protein_g)} g`} />
+                    <StatPill label="carbs" value={`${Math.round(mealPreview.preview_nutrients.carbs_g)} g`} tone="warning" />
+                    <StatPill label="grasas" value={`${Math.round(mealPreview.preview_nutrients.fat_g)} g`} tone="danger" />
+                  </View>
+                  <View style={styles.portionQuickRow}>
+                    <Pressable style={styles.portionQuickChip} onPress={() => void runMealPreview(-10)}>
+                      <Text style={styles.portionQuickChipText}>-10%</Text>
+                    </Pressable>
+                    <Pressable style={styles.portionQuickChip} onPress={() => void runMealPreview(0)}>
+                      <Text style={styles.portionQuickChipText}>Aceptar</Text>
+                    </Pressable>
+                    <Pressable style={styles.portionQuickChip} onPress={() => void runMealPreview(10)}>
+                      <Text style={styles.portionQuickChipText}>+10%</Text>
+                    </Pressable>
+                  </View>
+                  <Text style={styles.helperText}>Ajuste actual: {mealAdjust > 0 ? `+${mealAdjust}` : mealAdjust}%</Text>
+                  <PrimaryButton title="Guardar estimación" onPress={() => void saveMealEstimate()} loading={saving} />
+                </AppCard>
+              ) : null}
+
+              <SecondaryButton title="Volver" onPress={resetToHub} disabled={saving} />
             </View>
           </ScrollView>
         ) : null}
