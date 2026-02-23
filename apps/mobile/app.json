@@ -1,0 +1,10 @@
+{
+  "expo": {
+    "name": "Nutri Tracker",
+    "slug": "nutri-tracker",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "platforms": ["ios", "android"],
+    "userInterfaceStyle": "light"
+  }
+}
