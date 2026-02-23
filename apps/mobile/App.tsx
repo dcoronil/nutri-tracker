@@ -131,6 +131,9 @@ type Product = {
   sugars_g: number | null;
   fiber_g: number | null;
   salt_g: number | null;
+  source: string;
+  is_verified: boolean;
+  verified_at: string | null;
   data_confidence: string;
 };
 
@@ -154,6 +157,39 @@ type LabelPhotoResponse = {
   product: Product | null;
   missing_fields: string[];
   questions: string[];
+};
+
+type ProductCorrectionResponse = {
+  product_id: number;
+  updated: boolean;
+  product: Product;
+  current: {
+    kcal: number | null;
+    protein_g: number | null;
+    fat_g: number | null;
+    sat_fat_g: number | null;
+    carbs_g: number | null;
+    sugars_g: number | null;
+    fiber_g: number | null;
+    salt_g: number | null;
+    nutrition_basis: NutritionBasis | null;
+    serving_size_g: number | null;
+  };
+  detected: {
+    kcal: number | null;
+    protein_g: number | null;
+    fat_g: number | null;
+    sat_fat_g: number | null;
+    carbs_g: number | null;
+    sugars_g: number | null;
+    fiber_g: number | null;
+    salt_g: number | null;
+    nutrition_basis: NutritionBasis | null;
+    serving_size_g: number | null;
+  };
+  missing_fields: string[];
+  questions: string[];
+  message: string;
 };
 
 type Nutrients = {
@@ -286,6 +322,15 @@ type AuthContextValue = {
     labelText: string;
     photos: string[];
   }) => Promise<LabelPhotoResponse>;
+  correctProductFromLabel: (input: {
+    productId?: number;
+    barcode?: string;
+    name?: string;
+    brand?: string;
+    labelText: string;
+    photos: string[];
+    confirmUpdate?: boolean;
+  }) => Promise<ProductCorrectionResponse>;
   createIntake: (payload: {
     product_id: number;
     method: IntakeMethod;
@@ -850,6 +895,60 @@ function AuthProvider({ children }: { children: import("react").ReactNode }) {
     [request],
   );
 
+  const correctProductFromLabel = useCallback(
+    async (input: {
+      productId?: number;
+      barcode?: string;
+      name?: string;
+      brand?: string;
+      labelText: string;
+      photos: string[];
+      confirmUpdate?: boolean;
+    }): Promise<ProductCorrectionResponse> => {
+      const form = new FormData();
+      if (input.confirmUpdate) {
+        form.append("confirm_update", "true");
+      }
+      if (input.barcode?.trim()) {
+        form.append("barcode", input.barcode.trim());
+      }
+      if (input.name?.trim()) {
+        form.append("name", input.name.trim());
+      }
+      if (input.brand !== undefined) {
+        form.append("brand", input.brand.trim());
+      }
+      if (input.labelText.trim()) {
+        form.append("label_text", input.labelText.trim());
+      }
+
+      input.photos.forEach((uri, index) => {
+        const name = uri.split("/").pop() || `label-correction-${index + 1}.jpg`;
+        form.append(
+          "photos",
+          {
+            uri,
+            name,
+            type: "image/jpeg",
+          } as unknown as Blob,
+        );
+      });
+
+      if (input.productId) {
+        return request<ProductCorrectionResponse>(`/products/${input.productId}/correct-from-label-photo`, {
+          method: "POST",
+          body: form,
+        });
+      }
+
+      return request<ProductCorrectionResponse>("/products/correct-by-barcode-from-label-photo", {
+        method: "POST",
+        body: form,
+      });
+    },
+    [request],
+  );
+
   const createIntake = useCallback(
     async (payload: {
       product_id: number;
@@ -932,6 +1031,7 @@ function AuthProvider({ children }: { children: import("react").ReactNode }) {
       fetchCalendar,
       lookupByBarcode,
       createProductFromLabel,
+      correctProductFromLabel,
       createIntake,
       fetchBodySummary,
       fetchWeightLogs,
@@ -949,6 +1049,7 @@ function AuthProvider({ children }: { children: import("react").ReactNode }) {
       createMeasurementLog,
       createWeightLog,
       createProductFromLabel,
+      correctProductFromLabel,
       fetchAnalysis,
       fetchBodySummary,
       fetchCalendar,
@@ -2987,6 +3088,7 @@ function AddScreen() {
   const [labelText, setLabelText] = useState("");
   const [labelPhotos, setLabelPhotos] = useState<string[]>([]);
   const [labelQuestions, setLabelQuestions] = useState<string[]>([]);
+  const [correctionPreview, setCorrectionPreview] = useState<ProductCorrectionResponse | null>(null);
 
   const [mealDescription, setMealDescription] = useState("");
   const [mealPhotos, setMealPhotos] = useState<string[]>([]);
@@ -3031,6 +3133,7 @@ function AddScreen() {
     setLabelText("");
     setLabelPhotos([]);
     setLabelQuestions([]);
+    setCorrectionPreview(null);
     setMethod("grams");
     setGrams(120);
     setUnits(1);
@@ -3191,6 +3294,7 @@ function AddScreen() {
       return;
     }
 
+    setCorrectionPreview(null);
     setLabelPhotos((current) => [...current, firstAsset.uri]);
   };
 
@@ -3216,6 +3320,28 @@ function AddScreen() {
 
     setSaving(true);
     try {
+      if (mode === "label_fix") {
+        if (!product?.id && !barcode.trim()) {
+          Alert.alert("Corrección", "Necesitas un producto activo o un barcode para corregir.");
+          return;
+        }
+
+        const correction = await auth.correctProductFromLabel({
+          productId: product?.id,
+          barcode: product?.id ? undefined : barcode.trim(),
+          name: labelName.trim(),
+          brand: labelBrand.trim(),
+          labelText: labelText.trim(),
+          photos: labelPhotos,
+          confirmUpdate: false,
+        });
+        setCorrectionPreview(correction);
+        if (correction.questions.length) {
+          setLabelQuestions(correction.questions);
+        }
+        return;
+      }
+
       const response = await auth.createProductFromLabel({
         barcode: barcode.trim() || undefined,
         name: labelName.trim(),
@@ -3237,6 +3363,43 @@ function AddScreen() {
       setPhase("quantity");
     } catch (error) {
       Alert.alert("Etiqueta", parseApiError(error));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const confirmCorrection = async () => {
+    if (mode !== "label_fix") {
+      return;
+    }
+    if (!product?.id && !barcode.trim()) {
+      Alert.alert("Corrección", "Necesitas un producto activo o un barcode para confirmar.");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const response = await auth.correctProductFromLabel({
+        productId: product?.id,
+        barcode: product?.id ? undefined : barcode.trim(),
+        name: labelName.trim(),
+        brand: labelBrand.trim(),
+        labelText: labelText.trim(),
+        photos: labelPhotos,
+        confirmUpdate: true,
+      });
+      setCorrectionPreview(response);
+      if (!response.updated) {
+        Alert.alert("Corrección", response.message);
+        return;
+      }
+      setProduct(response.product);
+      prefillFromPreference(response.product, preferredServing);
+      setMode("barcode");
+      setPhase("quantity");
+      Alert.alert("Corrección", "Producto actualizado con datos verificados.");
+    } catch (error) {
+      Alert.alert("Corrección", parseApiError(error));
     } finally {
       setSaving(false);
     }
@@ -3306,6 +3469,21 @@ function AddScreen() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const openCorrectionFromProduct = () => {
+    if (!product) {
+      return;
+    }
+    setMode("label_fix");
+    setPhase("label");
+    setBarcode(product.barcode ?? "");
+    setLabelName(product.name);
+    setLabelBrand(product.brand ?? "");
+    setLabelText("");
+    setLabelPhotos([]);
+    setLabelQuestions([]);
+    setCorrectionPreview(null);
   };
 
   useEffect(() => {
@@ -3446,13 +3624,37 @@ function AddScreen() {
               <InputField
                 label="Barcode (opcional)"
                 value={barcode}
-                onChangeText={setBarcode}
+                onChangeText={(value) => {
+                  setBarcode(value);
+                  setCorrectionPreview(null);
+                }}
                 keyboardType="numeric"
                 placeholder="EAN/UPC"
               />
-              <InputField label="Nombre" value={labelName} onChangeText={setLabelName} />
-              <InputField label="Marca" value={labelBrand} onChangeText={setLabelBrand} />
-              <InputField label="Texto etiqueta (opcional)" value={labelText} onChangeText={setLabelText} />
+              <InputField
+                label="Nombre"
+                value={labelName}
+                onChangeText={(value) => {
+                  setLabelName(value);
+                  setCorrectionPreview(null);
+                }}
+              />
+              <InputField
+                label="Marca"
+                value={labelBrand}
+                onChangeText={(value) => {
+                  setLabelBrand(value);
+                  setCorrectionPreview(null);
+                }}
+              />
+              <InputField
+                label="Texto etiqueta (opcional)"
+                value={labelText}
+                onChangeText={(value) => {
+                  setLabelText(value);
+                  setCorrectionPreview(null);
+                }}
+              />
 
               {labelQuestions.map((question) => (
                 <Text key={question} style={styles.helperText}>
@@ -3464,10 +3666,40 @@ function AddScreen() {
               <Text style={styles.helperText}>{labelPhotos.length} foto(s) adjuntas</Text>
 
               <PrimaryButton
-                title={mode === "label_fix" ? "Procesar y actualizar" : "Crear producto"}
+                title={mode === "label_fix" ? "Analizar corrección" : "Crear producto"}
                 onPress={() => void createFromLabel()}
                 loading={saving}
               />
+              {mode === "label_fix" && correctionPreview ? (
+                <AppCard style={styles.previewCard}>
+                  <SectionHeader title="Comparación" subtitle={correctionPreview.message} />
+                  <Text style={styles.helperText}>
+                    kcal actual/detectado: {Math.round(correctionPreview.current.kcal ?? 0)} /{" "}
+                    {Math.round(correctionPreview.detected.kcal ?? 0)}
+                  </Text>
+                  <Text style={styles.helperText}>
+                    proteína actual/detectado: {Math.round(correctionPreview.current.protein_g ?? 0)} /{" "}
+                    {Math.round(correctionPreview.detected.protein_g ?? 0)} g
+                  </Text>
+                  <Text style={styles.helperText}>
+                    grasas actual/detectado: {Math.round(correctionPreview.current.fat_g ?? 0)} /{" "}
+                    {Math.round(correctionPreview.detected.fat_g ?? 0)} g
+                  </Text>
+                  <Text style={styles.helperText}>
+                    carbs actual/detectado: {Math.round(correctionPreview.current.carbs_g ?? 0)} /{" "}
+                    {Math.round(correctionPreview.detected.carbs_g ?? 0)} g
+                  </Text>
+                  {correctionPreview.missing_fields.length ? (
+                    <Text style={styles.helperText}>Faltan campos: {correctionPreview.missing_fields.join(", ")}</Text>
+                  ) : null}
+                  <PrimaryButton
+                    title="Confirmar actualización"
+                    onPress={() => void confirmCorrection()}
+                    disabled={correctionPreview.missing_fields.length > 0}
+                    loading={saving}
+                  />
+                </AppCard>
+              ) : null}
               <SecondaryButton title="Volver" onPress={resetToHub} disabled={saving} />
             </View>
           </ScrollView>
@@ -3646,6 +3878,7 @@ function AddScreen() {
               </AppCard>
 
               <PrimaryButton title="Guardar consumo" onPress={() => void saveIntake()} loading={saving} />
+              <SecondaryButton title="Corregir valores con foto de etiqueta" onPress={openCorrectionFromProduct} disabled={saving} />
               <SecondaryButton title="Escanear otro" onPress={() => void startBarcodeFlow()} disabled={saving} />
               <SecondaryButton title="Volver a Añadir" onPress={resetToHub} disabled={saving} />
             </View>

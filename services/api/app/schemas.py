@@ -171,6 +171,9 @@ class ProductRead(BaseModel):
     sugars_g: float | None
     fiber_g: float | None
     salt_g: float | None
+    source: str
+    is_verified: bool
+    verified_at: datetime | None
     data_confidence: str
 
     model_config = {"from_attributes": True}
@@ -203,6 +206,17 @@ class LabelPhotoResponse(BaseModel):
     extracted: NutritionExtract
     missing_fields: list[str] = Field(default_factory=list)
     questions: list[str] = Field(default_factory=list)
+
+
+class ProductCorrectionResponse(BaseModel):
+    product_id: int
+    updated: bool
+    product: ProductRead
+    current: NutritionExtract
+    detected: NutritionExtract
+    missing_fields: list[str] = Field(default_factory=list)
+    questions: list[str] = Field(default_factory=list)
+    message: str
 
 
 class IntakeCreate(BaseModel):

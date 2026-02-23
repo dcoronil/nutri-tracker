@@ -88,3 +88,89 @@ def test_local_manual_product_does_not_mix_with_openfoodfacts_image(monkeypatch,
     assert body["source"] == "local"
     assert body["product"]["name"] == "Producto manual"
     assert body["product"]["image_url"] is None
+
+
+def test_correct_product_from_label_photo_preview_and_confirm(client, auth_headers):
+    payload = {
+        "barcode": "88001122",
+        "name": "Galletas",
+        "brand": "Demo",
+        "nutrition_basis": NutritionBasis.per_100g.value,
+        "label_text": "Por 100 g Energía 450 kcal Proteínas 6 g Grasas 16 g Carbohidratos 70 g",
+    }
+    create_response = client.post("/products/from_label_photo", data=payload, headers=auth_headers)
+    assert create_response.status_code == 200
+    created = create_response.json()["product"]
+    product_id = created["id"]
+
+    preview = client.post(
+        f"/products/{product_id}/correct-from-label-photo",
+        data={
+            "label_text": "Por 100 g Energía 390 kcal Proteínas 8 g Grasas 10 g Carbohidratos 66 g",
+        },
+        headers=auth_headers,
+    )
+    assert preview.status_code == 200
+    preview_body = preview.json()
+    assert preview_body["updated"] is False
+    assert preview_body["current"]["kcal"] == 450.0
+    assert preview_body["detected"]["kcal"] == 390.0
+
+    confirm = client.post(
+        f"/products/{product_id}/correct-from-label-photo",
+        data={
+            "confirm_update": "true",
+            "label_text": "Por 100 g Energía 390 kcal Proteínas 8 g Grasas 10 g Carbohidratos 66 g",
+        },
+        headers=auth_headers,
+    )
+    assert confirm.status_code == 200
+    body = confirm.json()
+    assert body["updated"] is True
+    assert body["product"]["kcal"] == 390.0
+    assert body["product"]["source"] == "local_verified"
+    assert body["product"]["is_verified"] is True
+    assert body["product"]["verified_at"] is not None
+
+
+def test_local_verified_product_is_not_refreshed_from_openfoodfacts(monkeypatch, client, auth_headers):
+    payload = {
+        "barcode": "99112233",
+        "name": "Producto fijo",
+        "brand": "Local",
+        "nutrition_basis": NutritionBasis.per_100g.value,
+        "label_text": "Por 100 g Energía 210 kcal Proteínas 9 g Grasas 8 g Carbohidratos 25 g",
+    }
+    create_response = client.post("/products/from_label_photo", data=payload, headers=auth_headers)
+    assert create_response.status_code == 200
+
+    calls = {"count": 0}
+
+    async def _mock_fetch(_ean: str):
+        calls["count"] += 1
+        return {
+            "barcode": "99112233",
+            "name": "Producto externo",
+            "brand": "OFF",
+            "image_url": "https://example.com/off.jpg",
+            "nutrition_basis": NutritionBasis.per_100g,
+            "serving_size_g": 20,
+            "net_weight_g": 100,
+            "kcal": 999,
+            "protein_g": 1,
+            "fat_g": 1,
+            "sat_fat_g": 1,
+            "carbs_g": 1,
+            "sugars_g": 1,
+            "fiber_g": 1,
+            "salt_g": 1,
+        }
+
+    monkeypatch.setattr("app.api.routes.fetch_openfoodfacts_product", _mock_fetch)
+
+    lookup = client.get("/products/by_barcode/99112233", headers=auth_headers)
+    assert lookup.status_code == 200
+    body = lookup.json()
+    assert calls["count"] == 0
+    assert body["product"]["name"] == "Producto fijo"
+    assert body["product"]["kcal"] == 210.0

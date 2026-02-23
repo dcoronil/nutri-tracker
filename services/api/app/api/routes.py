@@ -42,6 +42,7 @@ from app.schemas import (
     LoginRequest,
     MeResponse,
     NutritionExtract,
+    ProductCorrectionResponse,
     ProductLookupResponse,
     ProductPreference,
     ProductRead,
@@ -468,6 +469,21 @@ def _preference_payload(pref: UserProductPreference | None) -> ProductPreference
     )
 
 
+def _nutrition_extract_from_product(product: Product) -> NutritionExtract:
+    return NutritionExtract(
+        kcal=product.kcal,
+        protein_g=product.protein_g,
+        fat_g=product.fat_g,
+        sat_fat_g=product.sat_fat_g,
+        carbs_g=product.carbs_g,
+        sugars_g=product.sugars_g,
+        fiber_g=product.fiber_g,
+        salt_g=product.salt_g,
+        nutrition_basis=product.nutrition_basis,
+        serving_size_g=product.serving_size_g,
+    )
+
+
 def _weight_log_to_read(record: BodyWeightLog) -> BodyWeightLogRead:
     return BodyWeightLogRead(
         id=record.id,
@@ -687,7 +703,10 @@ def _apply_openfoodfacts_payload(product: Product, off_product: dict[str, object
     product.sugars_g = off_product.get("sugars_g")  # type: ignore[assignment]
     product.fiber_g = off_product.get("fiber_g")  # type: ignore[assignment]
     product.salt_g = off_product.get("salt_g")  # type: ignore[assignment]
-    product.data_confidence = "openfoodfacts"
+    product.source = "openfoodfacts"
+    product.is_verified = False
+    product.verified_at = None
+    product.data_confidence = "openfoodfacts_imported"
 
 
 @router.get("/products/by_barcode/{ean}", response_model=ProductLookupResponse)
@@ -703,7 +722,7 @@ async def product_by_barcode(
     if local:
         # Avoid mixing label/manual nutrition with external images.
         # Only sync OpenFoodFacts products with OpenFoodFacts data.
-        if local.data_confidence == "openfoodfacts":
+        if local.source == "openfoodfacts" and not local.is_verified:
             try:
                 off_product = await fetch_openfoodfacts_product(ean)
             except OpenFoodFactsClientError:
@@ -838,7 +857,10 @@ async def create_product_from_label_photo(
         existing.sugars_g = payload.get("sugars_g")
         existing.fiber_g = payload.get("fiber_g")
         existing.salt_g = payload.get("salt_g")
-        existing.data_confidence = "label_photo"
+        existing.source = "local_verified"
+        existing.is_verified = True
+        existing.verified_at = datetime.now(UTC)
+        existing.data_confidence = "label_photo_verified"
         product = existing
     else:
         product = Product(
@@ -857,7 +879,10 @@ async def create_product_from_label_photo(
             sugars_g=payload.get("sugars_g"),
             fiber_g=payload.get("fiber_g"),
             salt_g=payload.get("salt_g"),
-            data_confidence="label_photo",
+            source="local_verified",
+            is_verified=True,
+            verified_at=datetime.now(UTC),
+            data_confidence="label_photo_verified",
         )
         session.add(product)
 
@@ -870,6 +895,185 @@ async def create_product_from_label_photo(
         extracted=nutrition_payload,
         missing_fields=[],
         questions=questions,
+    )
+
+
+def _apply_extracted_label_to_product(
+    product: Product,
+    payload: dict[str, object],
+    *,
+    name: str | None = None,
+    brand: str | None = None,
+) -> None:
+    if name is not None and name.strip():
+        product.name = name.strip()
+    if brand is not None:
+        brand_clean = brand.strip()
+        product.brand = brand_clean or None
+
+    product.nutrition_basis = payload["nutrition_basis"]  # type: ignore[assignment]
+    product.serving_size_g = payload.get("serving_size_g")  # type: ignore[assignment]
+    product.net_weight_g = payload.get("net_weight_g")  # type: ignore[assignment]
+    product.kcal = payload["kcal"]  # type: ignore[assignment]
+    product.protein_g = payload["protein_g"]  # type: ignore[assignment]
+    product.fat_g = payload["fat_g"]  # type: ignore[assignment]
+    product.sat_fat_g = payload.get("sat_fat_g")  # type: ignore[assignment]
+    product.carbs_g = payload["carbs_g"]  # type: ignore[assignment]
+    product.sugars_g = payload.get("sugars_g")  # type: ignore[assignment]
+    product.fiber_g = payload.get("fiber_g")  # type: ignore[assignment]
+    product.salt_g = payload.get("salt_g")  # type: ignore[assignment]
+    product.source = "local_verified"
+    product.is_verified = True
+    product.verified_at = datetime.now(UTC)
+    product.data_confidence = "label_photo_verified"
+
+
+async def _correct_product_from_label_impl(
+    *,
+    product: Product,
+    session: Session,
+    confirm_update: bool,
+    name: str | None,
+    brand: str | None,
+    nutrition_basis: NutritionBasis | None,
+    serving_size_g: float | None,
+    net_weight_g: float | None,
+    label_text: str | None,
+    photos: list[UploadFile] | None,
+) -> ProductCorrectionResponse:
+    extracted_text = (label_text or "").strip()
+    photo_files = photos or []
+    if not extracted_text and photo_files:
+        extracted_text = await ocr_text_from_images(photo_files)
+
+    extracted = extract_nutrition_from_text(extracted_text, basis_hint=nutrition_basis)
+    extracted["serving_size_g"] = extracted.get("serving_size_g") or serving_size_g
+    extracted["net_weight_g"] = net_weight_g if net_weight_g is not None else product.net_weight_g
+
+    missing_fields = missing_critical_fields(extracted)
+    questions = coherence_questions(extracted)
+
+    if not extracted_text:
+        questions.insert(0, "No se pudo extraer texto de la etiqueta. Sube una imagen más nítida o pega el OCR.")
+
+    detected_payload = NutritionExtract.model_validate(extracted)
+    current_payload = _nutrition_extract_from_product(product)
+
+    if not confirm_update:
+        return ProductCorrectionResponse(
+            product_id=product.id,
+            updated=False,
+            product=ProductRead.model_validate(product),
+            current=current_payload,
+            detected=detected_payload,
+            missing_fields=missing_fields,
+            questions=questions,
+            message="Revisa comparación y reenvía con confirm_update=true para guardar.",
+        )
+
+    if missing_fields:
+        return ProductCorrectionResponse(
+            product_id=product.id,
+            updated=False,
+            product=ProductRead.model_validate(product),
+            current=current_payload,
+            detected=detected_payload,
+            missing_fields=missing_fields,
+            questions=questions,
+            message="Faltan campos críticos; no se guardó la corrección.",
+        )
+
+    payload = sanitize_numeric_values(extracted)
+    _apply_extracted_label_to_product(
+        product,
+        payload,
+        name=name,
+        brand=brand,
+    )
+
+    session.add(product)
+    session.commit()
+    session.refresh(product)
+
+    return ProductCorrectionResponse(
+        product_id=product.id,
+        updated=True,
+        product=ProductRead.model_validate(product),
+        current=current_payload,
+        detected=detected_payload,
+        missing_fields=[],
+        questions=questions,
+        message="Producto actualizado y marcado como verificado localmente.",
+    )
+
+
+@router.post("/products/{product_id}/correct-from-label-photo", response_model=ProductCorrectionResponse)
+async def correct_product_from_label_photo(
+    product_id: int,
+    current_user: Annotated[UserAccount, Depends(get_ready_user)],
+    session: Annotated[Session, Depends(get_session)],
+    confirm_update: Annotated[bool, Form()] = False,
+    name: Annotated[str | None, Form()] = None,
+    brand: Annotated[str | None, Form()] = None,
+    nutrition_basis: Annotated[NutritionBasis | None, Form()] = None,
+    serving_size_g: Annotated[float | None, Form()] = None,
+    net_weight_g: Annotated[float | None, Form()] = None,
+    label_text: Annotated[str | None, Form()] = None,
+    photos: Annotated[list[UploadFile] | None, File()] = None,
+) -> ProductCorrectionResponse:
+    del current_user
+    product = session.get(Product, product_id)
+    if not product:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+
+    return await _correct_product_from_label_impl(
+        product=product,
+        session=session,
+        confirm_update=confirm_update,
+        name=name,
+        brand=brand,
+        nutrition_basis=nutrition_basis,
+        serving_size_g=serving_size_g,
+        net_weight_g=net_weight_g,
+        label_text=label_text,
+        photos=photos,
+    )
+
+
+@router.post("/products/correct-by-barcode-from-label-photo", response_model=ProductCorrectionResponse)
+async def correct_product_by_barcode_from_label_photo(
+    current_user: Annotated[UserAccount, Depends(get_ready_user)],
+    session: Annotated[Session, Depends(get_session)],
+    barcode: Annotated[str, Form()],
+    confirm_update: Annotated[bool, Form()] = False,
+    name: Annotated[str | None, Form()] = None,
+    brand: Annotated[str | None, Form()] = None,
+    nutrition_basis: Annotated[NutritionBasis | None, Form()] = None,
+    serving_size_g: Annotated[float | None, Form()] = None,
+    net_weight_g: Annotated[float | None, Form()] = None,
+    label_text: Annotated[str | None, Form()] = None,
+    photos: Annotated[list[UploadFile] | None, File()] = None,
+) -> ProductCorrectionResponse:
+    del current_user
+    code = barcode.strip()
+    if not code:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="barcode is required")
+
+    product = session.exec(select(Product).where(Product.barcode == code)).first()
+    if not product:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found for barcode")
+
+    return await _correct_product_from_label_impl(
+        product=product,
+        session=session,
+        confirm_update=confirm_update,
+        name=name,
+        brand=brand,
+        nutrition_basis=nutrition_basis,
+        serving_size_g=serving_size_g,
+        net_weight_g=net_weight_g,
+        label_text=label_text,
+        photos=photos,
     )
 
 

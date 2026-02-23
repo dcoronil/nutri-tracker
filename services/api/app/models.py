@@ -109,6 +109,9 @@ class Product(SQLModel, table=True):
     fiber_g: float | None = Field(default=None, ge=0)
     salt_g: float | None = Field(default=None, ge=0)
 
+    source: str = Field(default="manual", max_length=64)
+    is_verified: bool = Field(default=False)
+    verified_at: datetime | None = None
     data_confidence: str = Field(default="manual", max_length=64)
     created_at: datetime = Field(default_factory=utcnow)
 
