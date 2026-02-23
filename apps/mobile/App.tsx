@@ -2433,10 +2433,12 @@ function ScanScreen() {
   const [permission, requestPermission] = useCameraPermissions();
   const [scanLocked, setScanLocked] = useState(false);
   const [processing, setProcessing] = useState(false);
+  const [scanSuccessFlash, setScanSuccessFlash] = useState(false);
   const [phase, setPhase] = useState<"camera" | "label" | "quantity">("camera");
   const [barcode, setBarcode] = useState("");
   const [product, setProduct] = useState<Product | null>(null);
   const [preferredServing, setPreferredServing] = useState<ProductPreference | null>(null);
+  const scanPulse = useRef(new Animated.Value(0)).current;
 
   const [labelName, setLabelName] = useState("");
   const [labelBrand, setLabelBrand] = useState("");
@@ -2450,10 +2452,47 @@ function ScanScreen() {
   const [percentPack, setPercentPack] = useState(25);
   const [saving, setSaving] = useState(false);
 
+  const resolvedQuantityG = useMemo(() => {
+    if (!product) {
+      return 0;
+    }
+    if (method === "grams") {
+      return grams;
+    }
+    if (method === "units") {
+      return (product.serving_size_g ?? 0) * units;
+    }
+    return (product.net_weight_g ?? 0) * (percentPack / 100);
+  }, [grams, method, percentPack, product, units]);
+
+  const previewNutrients = useMemo(() => {
+    if (!product || resolvedQuantityG <= 0) {
+      return null;
+    }
+
+    const factor =
+      product.nutrition_basis === "per_serving"
+        ? product.serving_size_g
+          ? resolvedQuantityG / product.serving_size_g
+          : 0
+        : resolvedQuantityG / 100;
+
+    if (factor <= 0) {
+      return null;
+    }
+    return {
+      kcal: Math.round(product.kcal * factor),
+      protein: Math.round(product.protein_g * factor * 10) / 10,
+      carbs: Math.round(product.carbs_g * factor * 10) / 10,
+      fats: Math.round(product.fat_g * factor * 10) / 10,
+    };
+  }, [product, resolvedQuantityG]);
+
   const resetToCamera = () => {
     setPhase("camera");
     setScanLocked(false);
     setProcessing(false);
+    setScanSuccessFlash(false);
     setProduct(null);
     setPreferredServing(null);
     setLabelName("");
@@ -2499,6 +2538,7 @@ function ScanScreen() {
     setScanLocked(true);
     setProcessing(true);
     Vibration.vibrate(50);
+    setScanSuccessFlash(true);
 
     try {
       const raw = result.data.trim();
@@ -2511,6 +2551,9 @@ function ScanScreen() {
         setPreferredServing(lookup.preferred_serving);
         setLabelName(lookup.product.name);
         setLabelBrand(lookup.product.brand ?? "");
+        await new Promise((resolve) => {
+          setTimeout(resolve, 180);
+        });
         setPhase("quantity");
       } else {
         setProduct(null);
@@ -2626,6 +2669,38 @@ function ScanScreen() {
     void requestCameraAndUnlock();
   }, []);
 
+  useEffect(() => {
+    if (phase !== "camera") {
+      return;
+    }
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(scanPulse, {
+          toValue: 1,
+          duration: 1100,
+          useNativeDriver: true,
+          easing: Easing.inOut(Easing.cubic),
+        }),
+        Animated.timing(scanPulse, {
+          toValue: 0,
+          duration: 1100,
+          useNativeDriver: true,
+          easing: Easing.inOut(Easing.cubic),
+        }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [phase, scanPulse]);
+
+  useEffect(() => {
+    if (!scanSuccessFlash) {
+      return;
+    }
+    const timer = setTimeout(() => setScanSuccessFlash(false), 900);
+    return () => clearTimeout(timer);
+  }, [scanSuccessFlash]);
+
   const hasCamera = permission?.granted ?? false;
 
   return (
@@ -2649,13 +2724,32 @@ function ScanScreen() {
             )}
 
             <View pointerEvents="none" style={styles.scanOverlay}>
-              <View style={styles.scanFrame}>
+              <Animated.View
+                style={[
+                  styles.scanFrame,
+                  {
+                    transform: [
+                      {
+                        scale: scanPulse.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: [1, 1.03],
+                        }),
+                      },
+                    ],
+                  },
+                ]}
+              >
                 <View style={[styles.scanCorner, styles.scanCornerTopLeft]} />
                 <View style={[styles.scanCorner, styles.scanCornerTopRight]} />
                 <View style={[styles.scanCorner, styles.scanCornerBottomLeft]} />
                 <View style={[styles.scanCorner, styles.scanCornerBottomRight]} />
-              </View>
-              <Text style={styles.scanHint}>Alinea el barcode dentro del marco</Text>
+              </Animated.View>
+              <Text style={styles.scanHint}>Centra el código de barras</Text>
+              {scanSuccessFlash ? (
+                <View style={styles.scanSuccessBadge}>
+                  <Text style={styles.scanSuccessBadgeText}>OK</Text>
+                </View>
+              ) : null}
             </View>
 
             {processing ? (
@@ -2723,21 +2817,54 @@ function ScanScreen() {
                     maximumTrackTintColor={theme.border}
                     thumbTintColor={theme.accent}
                   />
+                  <TextInput
+                    value={String(Math.round(grams))}
+                    onChangeText={(value) => {
+                      const parsed = Number(value);
+                      if (Number.isFinite(parsed)) {
+                        setGrams(clamp(parsed, 1, 2000));
+                      }
+                    }}
+                    keyboardType="numeric"
+                    style={styles.quantityInput}
+                  />
                 </View>
               ) : null}
 
               {method === "units" ? (
                 <View style={styles.sliderWrap}>
                   <Text style={styles.sliderLabel}>{units.toFixed(1)} porciones</Text>
+                  <View style={styles.portionQuickRow}>
+                    {[0.5, 1, 1.5, 2].map((multiplier) => (
+                      <Pressable
+                        key={multiplier}
+                        style={styles.portionQuickChip}
+                        onPress={() => setUnits(clamp(multiplier, 0.25, 12))}
+                      >
+                        <Text style={styles.portionQuickChipText}>{multiplier}x</Text>
+                      </Pressable>
+                    ))}
+                  </View>
                   <Slider
                     minimumValue={0.25}
-                    maximumValue={6}
+                    maximumValue={12}
                     step={0.25}
                     value={units}
                     onValueChange={setUnits}
                     minimumTrackTintColor={theme.accent}
                     maximumTrackTintColor={theme.border}
                     thumbTintColor={theme.accent}
+                  />
+                  <TextInput
+                    value={String(units)}
+                    onChangeText={(value) => {
+                      const parsed = Number(value);
+                      if (Number.isFinite(parsed)) {
+                        setUnits(clamp(parsed, 0.25, 12));
+                      }
+                    }}
+                    keyboardType="numeric"
+                    style={styles.quantityInput}
                   />
                   <Text style={styles.helperText}>serving_size_g: {product.serving_size_g ?? "N/A"}</Text>
                 </View>
@@ -2747,7 +2874,7 @@ function ScanScreen() {
                 <View style={styles.sliderWrap}>
                   <Text style={styles.sliderLabel}>{Math.round(percentPack)}% paquete</Text>
                   <Slider
-                    minimumValue={1}
+                    minimumValue={0}
                     maximumValue={100}
                     step={1}
                     value={percentPack}
@@ -2756,12 +2883,37 @@ function ScanScreen() {
                     maximumTrackTintColor={theme.border}
                     thumbTintColor={theme.accent}
                   />
+                  <TextInput
+                    value={String(Math.round(percentPack))}
+                    onChangeText={(value) => {
+                      const parsed = Number(value);
+                      if (Number.isFinite(parsed)) {
+                        setPercentPack(clamp(parsed, 0, 100));
+                      }
+                    }}
+                    keyboardType="numeric"
+                    style={styles.quantityInput}
+                  />
                   <Text style={styles.helperText}>net_weight_g: {product.net_weight_g ?? "N/A"}</Text>
                 </View>
               ) : null}
 
+              <AppCard style={styles.previewCard}>
+                <SectionHeader title="Preview nutricional" subtitle={`${Math.round(resolvedQuantityG)} g equivalentes`} />
+                {previewNutrients ? (
+                  <View style={styles.previewRow}>
+                    <StatPill label="kcal" value={String(previewNutrients.kcal)} tone="accent" />
+                    <StatPill label="prote" value={`${previewNutrients.protein} g`} />
+                    <StatPill label="carbs" value={`${previewNutrients.carbs} g`} tone="warning" />
+                    <StatPill label="grasas" value={`${previewNutrients.fats} g`} tone="danger" />
+                  </View>
+                ) : (
+                  <Text style={styles.helperText}>Sin datos para este método/cantidad.</Text>
+                )}
+              </AppCard>
+
               <PrimaryButton title="Guardar consumo" onPress={() => void saveIntake()} loading={saving} />
-              <SecondaryButton title="Volver a cámara" onPress={resetToCamera} disabled={saving} />
+              <SecondaryButton title="Escanear otro" onPress={resetToCamera} disabled={saving} />
             </View>
           </ScrollView>
         ) : null}
@@ -3626,6 +3778,20 @@ const styles = StyleSheet.create({
     fontSize: 12,
     letterSpacing: 0.2,
   },
+  scanSuccessBadge: {
+    marginTop: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: theme.accent,
+    backgroundColor: theme.accentSoft,
+  },
+  scanSuccessBadgeText: {
+    color: theme.accent,
+    fontWeight: "800",
+    letterSpacing: 1,
+  },
   scanBusyOverlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: "rgba(5,7,13,0.68)",
@@ -3691,6 +3857,44 @@ const styles = StyleSheet.create({
     color: theme.text,
     fontWeight: "700",
     fontSize: 15,
+  },
+  quantityInput: {
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: theme.panelSoft,
+    borderRadius: 12,
+    color: theme.text,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+  },
+  portionQuickRow: {
+    flexDirection: "row",
+    gap: 8,
+    flexWrap: "wrap",
+  },
+  portionQuickChip: {
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: theme.panelSoft,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  portionQuickChipText: {
+    color: theme.text,
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  previewCard: {
+    padding: 12,
+    borderRadius: 14,
+    backgroundColor: theme.panelMuted,
+    borderColor: theme.border,
+  },
+  previewRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
   },
   tabBar: {
     position: "absolute",
