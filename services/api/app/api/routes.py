@@ -46,6 +46,7 @@ from app.schemas import (
     MeResponse,
     NutritionExtract,
     ProductCorrectionResponse,
+    ProductDataQualityResponse,
     ProductLookupResponse,
     ProductPreference,
     ProductRead,
@@ -713,6 +714,46 @@ def _apply_openfoodfacts_payload(product: Product, off_product: dict[str, object
     product.data_confidence = "openfoodfacts_imported"
 
 
+def _product_data_quality(product: Product) -> ProductDataQualityResponse:
+    if product.id is None:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Product id missing")
+
+    if product.is_verified or product.source == "local_verified":
+        return ProductDataQualityResponse(
+            product_id=product.id,
+            status="verified",
+            label="Verificado",
+            source=product.source,
+            is_verified=product.is_verified,
+            data_confidence=product.data_confidence,
+            verified_at=product.verified_at,
+            message="Valores verificados localmente con etiqueta o revisión manual.",
+        )
+
+    if product.source == "photo_estimate" or product.data_confidence.startswith("estimate"):
+        return ProductDataQualityResponse(
+            product_id=product.id,
+            status="estimated",
+            label="Estimado",
+            source=product.source,
+            is_verified=False,
+            data_confidence=product.data_confidence,
+            verified_at=product.verified_at,
+            message="Estimación aproximada; revisar con etiqueta real cuando sea posible.",
+        )
+
+    return ProductDataQualityResponse(
+        product_id=product.id,
+        status="imported",
+        label="Importado",
+        source=product.source,
+        is_verified=product.is_verified,
+        data_confidence=product.data_confidence,
+        verified_at=product.verified_at,
+        message="Datos importados de fuente externa sin verificación local.",
+    )
+
+
 @router.get("/products/by_barcode/{ean}", response_model=ProductLookupResponse)
 async def product_by_barcode(
     ean: str,
@@ -789,6 +830,19 @@ async def product_by_barcode(
     session.refresh(product)
 
     return ProductLookupResponse(source="openfoodfacts_imported", product=ProductRead.model_validate(product))
+
+
+@router.get("/products/{product_id}/data-quality", response_model=ProductDataQualityResponse)
+def product_data_quality(
+    product_id: int,
+    current_user: Annotated[UserAccount, Depends(get_ready_user)],
+    session: Annotated[Session, Depends(get_session)],
+) -> ProductDataQualityResponse:
+    del current_user
+    product = session.get(Product, product_id)
+    if not product:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+    return _product_data_quality(product)
 
 
 @router.post("/products/from_label_photo", response_model=LabelPhotoResponse)

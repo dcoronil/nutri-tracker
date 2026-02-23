@@ -51,6 +51,11 @@ def test_meal_photo_preview_and_commit(client, auth_headers):
     assert commit_body["intake"] is not None
     assert commit_body["intake"]["estimated"] is True
     assert commit_body["intake"]["source_method"] == "meal_photo"
+    estimated_product_id = commit_body["intake"]["product_id"]
+
+    quality = client.get(f"/products/{estimated_product_id}/data-quality", headers=auth_headers)
+    assert quality.status_code == 200
+    assert quality.json()["status"] == "estimated"
 
     summary = client.get(f"/days/{date.today().isoformat()}/summary", headers=auth_headers)
     assert summary.status_code == 200

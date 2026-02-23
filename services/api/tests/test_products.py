@@ -174,3 +174,48 @@ def test_local_verified_product_is_not_refreshed_from_openfoodfacts(monkeypatch,
     assert calls["count"] == 0
     assert body["product"]["name"] == "Producto fijo"
     assert body["product"]["kcal"] == 210.0
+
+
+def test_product_data_quality_verified_and_imported(monkeypatch, client, auth_headers):
+    local_payload = {
+        "barcode": "33001122",
+        "name": "Local verificado",
+        "brand": "Casa",
+        "nutrition_basis": NutritionBasis.per_100g.value,
+        "label_text": "Por 100 g Energía 120 kcal Proteínas 11 g Grasas 2 g Carbohidratos 14 g",
+    }
+    local_create = client.post("/products/from_label_photo", data=local_payload, headers=auth_headers)
+    assert local_create.status_code == 200
+    local_product_id = local_create.json()["product"]["id"]
+
+    local_quality = client.get(f"/products/{local_product_id}/data-quality", headers=auth_headers)
+    assert local_quality.status_code == 200
+    assert local_quality.json()["status"] == "verified"
+
+    async def _mock_fetch(_ean: str):
+        return {
+            "barcode": "44001122",
+            "name": "Importado OFF",
+            "brand": "OFF",
+            "image_url": None,
+            "nutrition_basis": NutritionBasis.per_100g,
+            "serving_size_g": 40,
+            "net_weight_g": 160,
+            "kcal": 500,
+            "protein_g": 7,
+            "fat_g": 24,
+            "sat_fat_g": 9,
+            "carbs_g": 62,
+            "sugars_g": 31,
+            "fiber_g": 1,
+            "salt_g": 0.5,
+        }
+
+    monkeypatch.setattr("app.api.routes.fetch_openfoodfacts_product", _mock_fetch)
+    imported_lookup = client.get("/products/by_barcode/44001122", headers=auth_headers)
+    assert imported_lookup.status_code == 200
+    imported_product_id = imported_lookup.json()["product"]["id"]
+
+    imported_quality = client.get(f"/products/{imported_product_id}/data-quality", headers=auth_headers)
+    assert imported_quality.status_code == 200
+    assert imported_quality.json()["status"] == "imported"

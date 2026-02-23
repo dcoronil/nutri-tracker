@@ -219,6 +219,17 @@ class ProductCorrectionResponse(BaseModel):
     message: str
 
 
+class ProductDataQualityResponse(BaseModel):
+    product_id: int
+    status: Literal["verified", "imported", "estimated"]
+    label: str
+    source: str
+    is_verified: bool
+    data_confidence: str
+    verified_at: datetime | None = None
+    message: str
+
+
 class IntakeCreate(BaseModel):
     product_id: int
     method: IntakeMethod

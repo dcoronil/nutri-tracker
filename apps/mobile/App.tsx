@@ -198,6 +198,17 @@ type MealEstimateQuestionsResponse = {
   detected_ingredients: string[];
 };
 
+type ProductDataQuality = {
+  product_id: number;
+  status: "verified" | "imported" | "estimated";
+  label: string;
+  source: string;
+  is_verified: boolean;
+  data_confidence: string;
+  verified_at: string | null;
+  message: string;
+};
+
 type Nutrients = {
   kcal: number;
   protein_g: number;
@@ -334,6 +345,7 @@ type AuthContextValue = {
   saveGoal: (day: string, goal: GoalPayload) => Promise<DailyGoalResponse>;
   fetchDaySummary: (day: string) => Promise<DaySummary>;
   fetchCalendar: (yearMonth: string) => Promise<CalendarMonthResponse>;
+  fetchProductDataQuality: (productId: number) => Promise<ProductDataQuality>;
   lookupByBarcode: (ean: string) => Promise<ProductLookupResponse>;
   createProductFromLabel: (input: {
     barcode?: string;
@@ -886,6 +898,12 @@ function AuthProvider({ children }: { children: import("react").ReactNode }) {
     [request],
   );
 
+  const fetchProductDataQuality = useCallback(
+    async (productId: number): Promise<ProductDataQuality> =>
+      request<ProductDataQuality>(`/products/${productId}/data-quality`),
+    [request],
+  );
+
   const lookupByBarcode = useCallback(
     async (ean: string): Promise<ProductLookupResponse> => request<ProductLookupResponse>(`/products/by_barcode/${ean}`),
     [request],
@@ -1149,6 +1167,7 @@ function AuthProvider({ children }: { children: import("react").ReactNode }) {
       saveGoal,
       fetchDaySummary,
       fetchCalendar,
+      fetchProductDataQuality,
       lookupByBarcode,
       createProductFromLabel,
       correctProductFromLabel,
@@ -1178,6 +1197,7 @@ function AuthProvider({ children }: { children: import("react").ReactNode }) {
       fetchBodySummary,
       fetchCalendar,
       fetchDaySummary,
+      fetchProductDataQuality,
       fetchMeasurementLogs,
       fetchGoal,
       fetchWeightLogs,
@@ -2039,7 +2059,13 @@ function MacroDonut({ segments, title }: { segments: Segment[]; title: string })
   );
 }
 
-function DashboardScreen({ onOpenBodyProgress }: { onOpenBodyProgress: () => void }) {
+function DashboardScreen({
+  onOpenBodyProgress,
+  onOpenAdd,
+}: {
+  onOpenBodyProgress: () => void;
+  onOpenAdd: () => void;
+}) {
   const auth = useAuth();
   const [selectedDate, setSelectedDate] = useState(formatDateLocal(new Date()));
   const [monthKey, setMonthKey] = useState(formatMonth(new Date()));
@@ -2173,6 +2199,21 @@ function DashboardScreen({ onOpenBodyProgress }: { onOpenBodyProgress: () => voi
               label={`${summary?.intakes.length ?? 0} registro${(summary?.intakes.length ?? 0) === 1 ? "" : "s"}`}
               tone={summary?.intakes.length ? "default" : "warning"}
             />
+          </View>
+        </AppCard>
+
+        <AppCard>
+          <SectionHeader title="Accesos rápidos" subtitle="Registro en 1 toque" />
+          <View style={styles.quickActionRow}>
+            <Pressable style={styles.quickActionBtn} onPress={onOpenAdd}>
+              <Text style={styles.quickActionBtnText}>Escanear / Añadir</Text>
+            </Pressable>
+            <Pressable style={styles.quickActionBtn} onPress={onOpenAdd}>
+              <Text style={styles.quickActionBtnText}>Foto comida</Text>
+            </Pressable>
+            <Pressable style={styles.quickActionBtn} onPress={onOpenBodyProgress}>
+              <Text style={styles.quickActionBtnText}>Registrar peso</Text>
+            </Pressable>
           </View>
         </AppCard>
 
@@ -3204,8 +3245,10 @@ function AddScreen() {
   const [phase, setPhase] = useState<"camera" | "label" | "quantity">("camera");
   const [barcode, setBarcode] = useState("");
   const [product, setProduct] = useState<Product | null>(null);
+  const [productQuality, setProductQuality] = useState<ProductDataQuality | null>(null);
   const [preferredServing, setPreferredServing] = useState<ProductPreference | null>(null);
   const scanPulse = useRef(new Animated.Value(0)).current;
+  const [recentProducts, setRecentProducts] = useState<Array<{ id: number; name: string }>>([]);
 
   const [labelName, setLabelName] = useState("");
   const [labelBrand, setLabelBrand] = useState("");
@@ -3237,6 +3280,7 @@ function AddScreen() {
   const [units, setUnits] = useState(1);
   const [percentPack, setPercentPack] = useState(25);
   const [saving, setSaving] = useState(false);
+  const todayKey = useMemo(() => formatDateLocal(new Date()), []);
 
   const hasCamera = permission?.granted ?? false;
 
@@ -3258,6 +3302,7 @@ function AddScreen() {
     setProcessing(false);
     setScanSuccessFlash(false);
     setProduct(null);
+    setProductQuality(null);
     setPreferredServing(null);
     setBarcode("");
     setLabelName("");
@@ -3300,6 +3345,26 @@ function AddScreen() {
       setPercentPack(pref.percent_pack);
     }
   }, []);
+
+  const loadRecentProducts = useCallback(async () => {
+    try {
+      const summary = await auth.fetchDaySummary(todayKey);
+      const seen = new Set<number>();
+      const next: Array<{ id: number; name: string }> = [];
+      [...summary.intakes]
+        .sort((a, b) => b.created_at.localeCompare(a.created_at))
+        .forEach((intake) => {
+          if (seen.has(intake.product_id)) {
+            return;
+          }
+          seen.add(intake.product_id);
+          next.push({ id: intake.product_id, name: intake.product_name ?? `Producto ${intake.product_id}` });
+        });
+      setRecentProducts(next.slice(0, 6));
+    } catch {
+      setRecentProducts([]);
+    }
+  }, [auth, todayKey]);
 
   const startBarcodeFlow = async () => {
     resetScanState();
@@ -3695,6 +3760,42 @@ function AddScreen() {
     }
   };
 
+  const saveWithPreferredQuantity = async () => {
+    if (!product || !preferredServing) {
+      Alert.alert("Cantidad", "No hay una cantidad previa guardada para este producto.");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      if (preferredServing.method === "grams") {
+        await auth.createIntake({
+          product_id: product.id,
+          method: "grams",
+          quantity_g: preferredServing.quantity_g ?? grams,
+        });
+      } else if (preferredServing.method === "units") {
+        await auth.createIntake({
+          product_id: product.id,
+          method: "units",
+          quantity_units: preferredServing.quantity_units ?? 1,
+        });
+      } else {
+        await auth.createIntake({
+          product_id: product.id,
+          method: "percent_pack",
+          percent_pack: preferredServing.percent_pack ?? 25,
+        });
+      }
+      Alert.alert("Consumo", "Guardado con la última cantidad usada.");
+      resetToHub();
+    } catch (error) {
+      Alert.alert("Consumo", parseApiError(error));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const openCorrectionFromProduct = () => {
     if (!product) {
       return;
@@ -3742,6 +3843,35 @@ function AddScreen() {
     return () => clearTimeout(timer);
   }, [scanSuccessFlash]);
 
+  useEffect(() => {
+    if (mode !== "hub") {
+      return;
+    }
+    void loadRecentProducts();
+  }, [loadRecentProducts, mode]);
+
+  useEffect(() => {
+    if (mode !== "barcode" || phase !== "quantity" || !product) {
+      return;
+    }
+    let active = true;
+    void auth
+      .fetchProductDataQuality(product.id)
+      .then((quality) => {
+        if (active) {
+          setProductQuality(quality);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setProductQuality(null);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [auth, mode, phase, product]);
+
   const subtitle =
     mode === "hub"
       ? "Escáner, etiqueta, foto de comida o carga manual"
@@ -3782,6 +3912,16 @@ function AddScreen() {
               subtitle="Crea producto rápido con macros por 100 g"
               onPress={startManualFlow}
             />
+            {recentProducts.length ? (
+              <AppCard>
+                <SectionHeader title="Últimos productos" subtitle="Acceso rápido reciente" />
+                <View style={styles.portionQuickRow}>
+                  {recentProducts.map((item) => (
+                    <TagChip key={item.id} label={item.name} />
+                  ))}
+                </View>
+              </AppCard>
+            ) : null}
           </ScrollView>
         ) : null}
 
@@ -4079,6 +4219,21 @@ function AddScreen() {
               <Text style={styles.helperText}>
                 {product.kcal} kcal | P {product.protein_g} | G {product.fat_g} | C {product.carbs_g} ({product.nutrition_basis})
               </Text>
+              {productQuality ? (
+                <>
+                  <TagChip
+                    label={`Calidad: ${productQuality.label}`}
+                    tone={
+                      productQuality.status === "verified"
+                        ? "accent"
+                        : productQuality.status === "estimated"
+                          ? "warning"
+                          : "default"
+                    }
+                  />
+                  <Text style={styles.helperText}>{productQuality.message}</Text>
+                </>
+              ) : null}
 
               <QuantityMethodSelector method={method} onChange={setMethod} product={product} />
 
@@ -4191,6 +4346,13 @@ function AddScreen() {
               </AppCard>
 
               <PrimaryButton title="Guardar consumo" onPress={() => void saveIntake()} loading={saving} />
+              {preferredServing ? (
+                <SecondaryButton
+                  title="Guardar con última cantidad usada"
+                  onPress={() => void saveWithPreferredQuantity()}
+                  disabled={saving}
+                />
+              ) : null}
               <SecondaryButton title="Corregir valores con foto de etiqueta" onPress={openCorrectionFromProduct} disabled={saving} />
               <SecondaryButton title="Escanear otro" onPress={() => void startBarcodeFlow()} disabled={saving} />
               <SecondaryButton title="Volver a Añadir" onPress={resetToHub} disabled={saving} />
@@ -4208,7 +4370,9 @@ function MainAppTabs() {
   return (
     <SafeAreaView style={styles.screen}>
       <View style={styles.flex1}>
-        {tab === "dashboard" ? <DashboardScreen onOpenBodyProgress={() => setTab("progress")} /> : null}
+        {tab === "dashboard" ? (
+          <DashboardScreen onOpenBodyProgress={() => setTab("progress")} onOpenAdd={() => setTab("add")} />
+        ) : null}
         {tab === "add" ? <AddScreen /> : null}
         {tab === "progress" ? <BodyProgressScreen /> : null}
         {tab === "history" ? <HistoryScreen /> : null}
@@ -4729,6 +4893,24 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 8,
     flexWrap: "wrap",
+  },
+  quickActionRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  quickActionBtn: {
+    borderWidth: 1,
+    borderColor: theme.border,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: theme.panelSoft,
+  },
+  quickActionBtnText: {
+    color: theme.text,
+    fontSize: 12,
+    fontWeight: "700",
   },
   macroToggleRow: {
     flexDirection: "row",
