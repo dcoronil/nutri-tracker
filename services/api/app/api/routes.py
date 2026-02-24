@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import re
 from datetime import UTC, date, datetime, time, timedelta
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile, status
+from sqlalchemy import or_
 from sqlmodel import Session, desc, select
 
 from app.config import get_settings
@@ -33,9 +34,12 @@ from app.schemas import (
     BodyWeightLogRead,
     CalendarDayEntry,
     CalendarMonthResponse,
+    CommunityFoodCreate,
     DailyGoalResponse,
     DailyGoalUpsert,
     DaySummary,
+    FoodSearchItem,
+    FoodSearchResponse,
     GoalFeedback,
     IntakeCreate,
     IntakeRead,
@@ -839,6 +843,18 @@ def _product_data_quality(product: Product) -> ProductDataQualityResponse:
             message="Estimación aproximada; revisar con etiqueta real cuando sea posible.",
         )
 
+    if product.source == "community":
+        return ProductDataQualityResponse(
+            product_id=product.id,
+            status="imported",
+            label="Comunidad",
+            source=product.source,
+            is_verified=product.is_verified,
+            data_confidence=product.data_confidence,
+            verified_at=product.verified_at,
+            message="Producto creado por la comunidad y compartido públicamente.",
+        )
+
     return ProductDataQualityResponse(
         product_id=product.id,
         status="imported",
@@ -849,6 +865,147 @@ def _product_data_quality(product: Product) -> ProductDataQualityResponse:
         verified_at=product.verified_at,
         message="Datos importados de fuente externa sin verificación local.",
     )
+
+
+def _product_badge(product: Product) -> Literal["Verificado", "Comunidad", "Importado", "Estimado"]:
+    if product.is_verified or product.source in {"local_verified", "community_verified"}:
+        return "Verificado"
+    if product.source == "community":
+        return "Comunidad"
+    if product.source == "photo_estimate" or product.data_confidence.startswith("estimate"):
+        return "Estimado"
+    return "Importado"
+
+
+@router.post("/foods/community", response_model=ProductRead)
+def create_community_food(
+    payload: CommunityFoodCreate,
+    current_user: Annotated[UserAccount, Depends(get_ready_user)],
+    session: Annotated[Session, Depends(get_session)],
+) -> ProductRead:
+    barcode = payload.barcode.strip() if payload.barcode else None
+    if barcode and not EAN_PATTERN.match(barcode):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid EAN/UPC")
+
+    if barcode:
+        existing = session.exec(select(Product).where(Product.barcode == barcode)).first()
+        if existing:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Barcode already exists")
+
+    image_url = payload.image_url.strip() if payload.image_url and payload.image_url.strip() else None
+    brand = payload.brand.strip() if payload.brand and payload.brand.strip() else None
+
+    product = Product(
+        barcode=barcode,
+        created_by_user_id=current_user.id,
+        is_public=True,
+        report_count=0,
+        name=payload.name.strip(),
+        brand=brand,
+        image_url=image_url,
+        nutrition_basis=payload.nutrition_basis,
+        serving_size_g=payload.serving_size_g,
+        net_weight_g=payload.net_weight_g,
+        kcal=payload.kcal,
+        protein_g=payload.protein_g,
+        fat_g=payload.fat_g,
+        sat_fat_g=payload.sat_fat_g,
+        carbs_g=payload.carbs_g,
+        sugars_g=payload.sugars_g,
+        fiber_g=payload.fiber_g,
+        salt_g=payload.salt_g,
+        source="community",
+        is_verified=False,
+        verified_at=None,
+        data_confidence="community_approved_auto",
+    )
+    session.add(product)
+    session.commit()
+    session.refresh(product)
+    return ProductRead.model_validate(product)
+
+
+@router.get("/foods/search", response_model=FoodSearchResponse)
+async def search_foods(
+    q: str,
+    current_user: Annotated[UserAccount, Depends(get_ready_user)],
+    session: Annotated[Session, Depends(get_session)],
+    limit: int = 20,
+) -> FoodSearchResponse:
+    query = q.strip()
+    if len(query) < 2:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="q must have at least 2 characters",
+        )
+
+    bounded_limit = max(1, min(limit, 40))
+    pattern = f"%{query}%"
+
+    rows = session.exec(
+        select(Product)
+        .where(or_(Product.is_public.is_(True), Product.created_by_user_id == current_user.id))
+        .where(
+            or_(
+                Product.name.ilike(pattern),
+                Product.brand.ilike(pattern),
+                Product.barcode.ilike(pattern),
+            )
+        )
+        .order_by(desc(Product.is_verified), desc(Product.created_at))
+        .limit(bounded_limit)
+    ).all()
+
+    should_try_openfoodfacts = (
+        EAN_PATTERN.match(query) is not None and all(product.barcode != query for product in rows)
+    )
+    if should_try_openfoodfacts:
+        try:
+            off_product = await fetch_openfoodfacts_product(query)
+        except OpenFoodFactsClientError:
+            off_product = None
+
+        if off_product and not off_missing_critical_fields(off_product):
+            imported = Product(
+                barcode=query,
+                name="",
+                brand=None,
+                image_url=None,
+                nutrition_basis=NutritionBasis.per_100g,
+                serving_size_g=None,
+                net_weight_g=None,
+                kcal=0,
+                protein_g=0,
+                fat_g=0,
+                sat_fat_g=None,
+                carbs_g=0,
+                sugars_g=None,
+                fiber_g=None,
+                salt_g=None,
+                data_confidence="manual",
+            )
+            _apply_openfoodfacts_payload(imported, off_product)
+            session.add(imported)
+            session.commit()
+            session.refresh(imported)
+            rows.insert(0, imported)
+
+    seen: set[int] = set()
+    results: list[FoodSearchItem] = []
+    for product in rows:
+        if product.id is None or product.id in seen:
+            continue
+        seen.add(product.id)
+        results.append(
+            FoodSearchItem(
+                product=ProductRead.model_validate(product),
+                badge=_product_badge(product),
+            )
+        )
+        if len(results) >= bounded_limit:
+            break
+
+    return FoodSearchResponse(query=query, results=results)
 
 
 @router.get("/products/by_barcode/{ean}", response_model=ProductLookupResponse)

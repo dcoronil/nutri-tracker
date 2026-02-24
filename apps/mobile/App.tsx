@@ -117,6 +117,9 @@ type BodySummary = {
 type Product = {
   id: number;
   barcode: string | null;
+  created_by_user_id: number | null;
+  is_public: boolean;
+  report_count: number;
   name: string;
   brand: string | null;
   image_url: string | null;
@@ -207,6 +210,16 @@ type ProductDataQuality = {
   data_confidence: string;
   verified_at: string | null;
   message: string;
+};
+
+type FoodSearchItem = {
+  product: Product;
+  badge: "Verificado" | "Comunidad" | "Importado" | "Estimado";
+};
+
+type FoodSearchResponse = {
+  query: string;
+  results: FoodSearchItem[];
 };
 
 type Nutrients = {
@@ -362,6 +375,24 @@ type AuthContextValue = {
   testUserAIKey: (payload: { provider?: "openai" | "gemini"; apiKey?: string }) => Promise<UserAIKeyTestResponse>;
   deleteUserAIKey: () => Promise<void>;
   fetchProductDataQuality: (productId: number) => Promise<ProductDataQuality>;
+  createCommunityFood: (payload: {
+    barcode?: string;
+    name: string;
+    brand?: string;
+    imageUrl?: string;
+    nutrition_basis?: NutritionBasis;
+    serving_size_g?: number;
+    net_weight_g?: number;
+    kcal: number;
+    protein_g: number;
+    fat_g: number;
+    carbs_g: number;
+    sat_fat_g?: number;
+    sugars_g?: number;
+    fiber_g?: number;
+    salt_g?: number;
+  }) => Promise<Product>;
+  searchFoods: (query: string, limit?: number) => Promise<FoodSearchResponse>;
   lookupByBarcode: (ean: string) => Promise<ProductLookupResponse>;
   createProductFromLabel: (input: {
     barcode?: string;
@@ -959,6 +990,57 @@ function AuthProvider({ children }: { children: import("react").ReactNode }) {
     [request],
   );
 
+  const createCommunityFood = useCallback(
+    async (payload: {
+      barcode?: string;
+      name: string;
+      brand?: string;
+      imageUrl?: string;
+      nutrition_basis?: NutritionBasis;
+      serving_size_g?: number;
+      net_weight_g?: number;
+      kcal: number;
+      protein_g: number;
+      fat_g: number;
+      carbs_g: number;
+      sat_fat_g?: number;
+      sugars_g?: number;
+      fiber_g?: number;
+      salt_g?: number;
+    }): Promise<Product> => {
+      return request<Product>("/foods/community", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          barcode: payload.barcode,
+          name: payload.name,
+          brand: payload.brand,
+          image_url: payload.imageUrl,
+          nutrition_basis: payload.nutrition_basis ?? "per_100g",
+          serving_size_g: payload.serving_size_g,
+          net_weight_g: payload.net_weight_g,
+          kcal: payload.kcal,
+          protein_g: payload.protein_g,
+          fat_g: payload.fat_g,
+          carbs_g: payload.carbs_g,
+          sat_fat_g: payload.sat_fat_g,
+          sugars_g: payload.sugars_g,
+          fiber_g: payload.fiber_g,
+          salt_g: payload.salt_g,
+        }),
+      });
+    },
+    [request],
+  );
+
+  const searchFoods = useCallback(
+    async (query: string, limit = 20): Promise<FoodSearchResponse> => {
+      const encoded = encodeURIComponent(query.trim());
+      return request<FoodSearchResponse>(`/foods/search?q=${encoded}&limit=${limit}`);
+    },
+    [request],
+  );
+
   const lookupByBarcode = useCallback(
     async (ean: string): Promise<ProductLookupResponse> => request<ProductLookupResponse>(`/products/by_barcode/${ean}`),
     [request],
@@ -1227,6 +1309,8 @@ function AuthProvider({ children }: { children: import("react").ReactNode }) {
       testUserAIKey,
       deleteUserAIKey,
       fetchProductDataQuality,
+      createCommunityFood,
+      searchFoods,
       lookupByBarcode,
       createProductFromLabel,
       correctProductFromLabel,
@@ -1255,12 +1339,14 @@ function AuthProvider({ children }: { children: import("react").ReactNode }) {
       saveUserAIKey,
       testUserAIKey,
       deleteUserAIKey,
+      createCommunityFood,
       fetchAnalysis,
       fetchBodySummary,
       fetchCalendar,
       fetchDaySummary,
       fetchUserAIKeyStatus,
       fetchProductDataQuality,
+      searchFoods,
       fetchMeasurementLogs,
       fetchGoal,
       fetchWeightLogs,
@@ -3580,10 +3666,15 @@ function AddScreen() {
 
   const [manualName, setManualName] = useState("");
   const [manualBrand, setManualBrand] = useState("");
+  const [manualBarcode, setManualBarcode] = useState("");
+  const [manualImageUrl, setManualImageUrl] = useState("");
   const [manualKcal, setManualKcal] = useState("");
   const [manualProtein, setManualProtein] = useState("");
   const [manualFat, setManualFat] = useState("");
   const [manualCarbs, setManualCarbs] = useState("");
+  const [manualSearch, setManualSearch] = useState("");
+  const [manualResults, setManualResults] = useState<FoodSearchItem[]>([]);
+  const [searchingFoods, setSearchingFoods] = useState(false);
 
   const [method, setMethod] = useState<IntakeMethod>("grams");
   const [grams, setGrams] = useState(120);
@@ -3708,10 +3799,14 @@ function AddScreen() {
     resetScanState();
     setManualName("");
     setManualBrand("");
+    setManualBarcode("");
+    setManualImageUrl("");
     setManualKcal("");
     setManualProtein("");
     setManualFat("");
     setManualCarbs("");
+    setManualSearch("");
+    setManualResults([]);
     setMode("manual");
   };
 
@@ -4004,6 +4099,36 @@ function AddScreen() {
     }
   };
 
+  const searchManualFoods = async () => {
+    const query = manualSearch.trim();
+    if (query.length < 2) {
+      Alert.alert("Buscar", "Escribe al menos 2 caracteres.");
+      return;
+    }
+
+    setSearchingFoods(true);
+    try {
+      const response = await auth.searchFoods(query);
+      setManualResults(response.results);
+      if (!response.results.length) {
+        Alert.alert("Buscar", "Sin resultados para esa búsqueda.");
+      }
+    } catch (error) {
+      Alert.alert("Buscar", parseApiError(error));
+    } finally {
+      setSearchingFoods(false);
+    }
+  };
+
+  const selectManualResult = (item: FoodSearchItem) => {
+    setProduct(item.product);
+    setPreferredServing(null);
+    setLabelName(item.product.name);
+    setLabelBrand(item.product.brand ?? "");
+    setMode("barcode");
+    setPhase("quantity");
+  };
+
   const saveManualProduct = async () => {
     const kcal = Number(manualKcal);
     const protein = Number(manualProtein);
@@ -4021,24 +4146,24 @@ function AddScreen() {
 
     setSaving(true);
     try {
-      const syntheticLabel = `Por 100 g Energía ${kcal} kcal Proteínas ${protein} g Grasas ${fat} g Carbohidratos ${carbs} g`;
-      const response = await auth.createProductFromLabel({
+      const response = await auth.createCommunityFood({
+        barcode: manualBarcode.trim() || undefined,
         name: manualName.trim(),
-        brand: manualBrand.trim(),
-        labelText: syntheticLabel,
-        photos: [],
+        brand: manualBrand.trim() || undefined,
+        imageUrl: manualImageUrl.trim() || undefined,
+        nutrition_basis: "per_100g",
+        kcal,
+        protein_g: protein,
+        fat_g: fat,
+        carbs_g: carbs,
       });
-
-      if (!response.created || !response.product) {
-        Alert.alert("Manual", response.questions.join("\n") || "No se pudo crear el producto manual.");
-        return;
-      }
-
-      setProduct(response.product);
+      setProduct(response);
+      setPreferredServing(null);
       setMode("barcode");
       setPhase("quantity");
       setMethod("grams");
       setGrams(120);
+      Alert.alert("Manual", "Producto compartido en la base comunitaria.");
     } catch (error) {
       Alert.alert("Manual", parseApiError(error));
     } finally {
@@ -4496,9 +4621,51 @@ function AddScreen() {
         {mode === "manual" ? (
           <ScrollView contentContainerStyle={styles.scanPane} keyboardShouldPersistTaps="handled">
             <View style={styles.sectionCard}>
-              <Text style={styles.sectionTitle}>Añadir manualmente</Text>
+              <Text style={styles.sectionTitle}>Añadir manualmente / Comunidad</Text>
+              <InputField
+                label="Buscar alimento (nombre/marca/barcode)"
+                value={manualSearch}
+                onChangeText={setManualSearch}
+                placeholder="Ej: yogur proteico"
+              />
+              <PrimaryButton title="Buscar alimentos" onPress={() => void searchManualFoods()} loading={searchingFoods} />
+              {manualResults.length ? (
+                <View style={styles.searchResultsWrap}>
+                  {manualResults.map((item) => (
+                    <Pressable
+                      key={`${item.product.id}-${item.badge}`}
+                      style={styles.searchResultRow}
+                      onPress={() => selectManualResult(item)}
+                    >
+                      <View style={styles.searchResultTextWrap}>
+                        <Text style={styles.searchResultTitle}>{item.product.name}</Text>
+                        <Text style={styles.searchResultSubtitle}>
+                          {item.product.brand ?? "Sin marca"} · {item.product.kcal} kcal
+                        </Text>
+                      </View>
+                      <TagChip label={item.badge} />
+                    </Pressable>
+                  ))}
+                </View>
+              ) : null}
+
+              <SectionHeader title="Crear y compartir alimento" subtitle="Se publica para búsquedas de otros usuarios" />
               <InputField label="Nombre" value={manualName} onChangeText={setManualName} placeholder="Producto manual" />
               <InputField label="Marca (opcional)" value={manualBrand} onChangeText={setManualBrand} />
+              <InputField
+                label="Barcode opcional"
+                value={manualBarcode}
+                onChangeText={setManualBarcode}
+                keyboardType="numeric"
+                placeholder="EAN/UPC"
+              />
+              <InputField
+                label="URL foto (opcional)"
+                value={manualImageUrl}
+                onChangeText={setManualImageUrl}
+                autoCapitalize="none"
+                placeholder="https://..."
+              />
               <InputField label="Kcal por 100 g" value={manualKcal} onChangeText={setManualKcal} keyboardType="numeric" />
               <InputField
                 label="Proteína por 100 g"
@@ -4508,7 +4675,7 @@ function AddScreen() {
               />
               <InputField label="Grasa por 100 g" value={manualFat} onChangeText={setManualFat} keyboardType="numeric" />
               <InputField label="Carbs por 100 g" value={manualCarbs} onChangeText={setManualCarbs} keyboardType="numeric" />
-              <PrimaryButton title="Crear producto manual" onPress={() => void saveManualProduct()} loading={saving} />
+              <PrimaryButton title="Guardar y compartir" onPress={() => void saveManualProduct()} loading={saving} />
               <SecondaryButton title="Volver" onPress={resetToHub} disabled={saving} />
             </View>
           </ScrollView>
@@ -5747,6 +5914,38 @@ const styles = StyleSheet.create({
   scanPane: {
     paddingBottom: 100,
     gap: 12,
+  },
+  searchResultsWrap: {
+    marginTop: 2,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: theme.border,
+    borderRadius: 14,
+    overflow: "hidden",
+  },
+  searchResultRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.border,
+    backgroundColor: theme.panelSoft,
+  },
+  searchResultTextWrap: {
+    flex: 1,
+    gap: 3,
+  },
+  searchResultTitle: {
+    color: theme.text,
+    fontWeight: "700",
+    fontSize: 14,
+  },
+  searchResultSubtitle: {
+    color: theme.muted,
+    fontSize: 12,
   },
   productImage: {
     width: "100%",

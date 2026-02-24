@@ -183,6 +183,9 @@ class ProductPreference(BaseModel):
 class ProductRead(BaseModel):
     id: int
     barcode: str | None
+    created_by_user_id: int | None
+    is_public: bool
+    report_count: int
     name: str
     brand: str | None
     image_url: str | None
@@ -254,6 +257,34 @@ class ProductDataQualityResponse(BaseModel):
     data_confidence: str
     verified_at: datetime | None = None
     message: str
+
+
+class CommunityFoodCreate(BaseModel):
+    barcode: str | None = Field(default=None, min_length=8, max_length=14)
+    name: str = Field(min_length=2, max_length=256)
+    brand: str | None = Field(default=None, max_length=128)
+    image_url: str | None = Field(default=None, max_length=1024)
+    nutrition_basis: NutritionBasis = NutritionBasis.per_100g
+    serving_size_g: float | None = Field(default=None, ge=0)
+    net_weight_g: float | None = Field(default=None, ge=0)
+    kcal: float = Field(ge=0)
+    protein_g: float = Field(ge=0)
+    fat_g: float = Field(ge=0)
+    sat_fat_g: float | None = Field(default=None, ge=0)
+    carbs_g: float = Field(ge=0)
+    sugars_g: float | None = Field(default=None, ge=0)
+    fiber_g: float | None = Field(default=None, ge=0)
+    salt_g: float | None = Field(default=None, ge=0)
+
+
+class FoodSearchItem(BaseModel):
+    product: ProductRead
+    badge: Literal["Verificado", "Comunidad", "Importado", "Estimado"]
+
+
+class FoodSearchResponse(BaseModel):
+    query: str
+    results: list[FoodSearchItem] = Field(default_factory=list)
 
 
 class IntakeCreate(BaseModel):

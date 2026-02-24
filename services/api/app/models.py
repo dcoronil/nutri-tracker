@@ -95,6 +95,9 @@ class UserProfile(SQLModel, table=True):
 class Product(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     barcode: str | None = Field(default=None, unique=True, index=True, max_length=32)
+    created_by_user_id: int | None = Field(default=None, foreign_key="user_account.id", index=True)
+    is_public: bool = Field(default=True)
+    report_count: int = Field(default=0, ge=0)
     name: str = Field(max_length=256)
     brand: str | None = Field(default=None, max_length=128)
     image_url: str | None = Field(default=None, max_length=1024)
