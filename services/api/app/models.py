@@ -52,6 +52,8 @@ class UserAccount(SQLModel, table=True):
     password_hash: str = Field(max_length=255)
     email_verified: bool = Field(default=False)
     onboarding_completed: bool = Field(default=False)
+    ai_provider: str | None = Field(default=None, max_length=32)
+    ai_api_key_encrypted: str | None = Field(default=None, max_length=4096)
     created_at: datetime = Field(default_factory=utcnow)
 
 

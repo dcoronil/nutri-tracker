@@ -56,7 +56,21 @@ from app.schemas import (
     RegisterRequest,
     RegisterResponse,
     ResendCodeRequest,
+    UserAIKeyDeleteResponse,
+    UserAIKeyStatusResponse,
+    UserAIKeyTestRequest,
+    UserAIKeyTestResponse,
+    UserAIKeyUpsertRequest,
     VerifyRequest,
+)
+from app.services.ai_keys import (
+    AIKeyValidationError,
+    decrypt_api_key,
+    encrypt_api_key,
+    mask_key_for_display,
+    normalize_provider_or_default,
+    test_provider_api_key,
+    validate_api_key_shape,
 )
 from app.services.auth import (
     AuthTokenError,
@@ -163,6 +177,26 @@ def _load_profile_or_404(session: Session, user_id: int) -> UserProfile:
     if not profile:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found")
     return profile
+
+
+def _ai_key_status(user: UserAccount) -> UserAIKeyStatusResponse:
+    configured = bool(user.ai_api_key_encrypted)
+    provider = None
+    key_hint = None
+
+    if configured:
+        try:
+            provider = normalize_provider_or_default(user.ai_provider)
+            key_hint = mask_key_for_display(decrypt_api_key(user.ai_api_key_encrypted or ""))
+        except AIKeyValidationError:
+            provider = normalize_provider_or_default(user.ai_provider)
+            key_hint = None
+
+    return UserAIKeyStatusResponse(
+        configured=configured,
+        provider=provider,
+        key_hint=key_hint,
+    )
 
 
 def get_current_user(
@@ -375,6 +409,69 @@ def me(
 ) -> MeResponse:
     profile = _load_profile(session, current_user.id)
     return MeResponse(user=_auth_user(current_user), profile=_profile_to_read(profile) if profile else None)
+
+
+@router.get("/user/ai-key/status", response_model=UserAIKeyStatusResponse)
+def user_ai_key_status(
+    current_user: Annotated[UserAccount, Depends(get_verified_user)],
+) -> UserAIKeyStatusResponse:
+    return _ai_key_status(current_user)
+
+
+@router.post("/user/ai-key", response_model=UserAIKeyStatusResponse)
+def upsert_user_ai_key(
+    payload: UserAIKeyUpsertRequest,
+    current_user: Annotated[UserAccount, Depends(get_verified_user)],
+    session: Annotated[Session, Depends(get_session)],
+) -> UserAIKeyStatusResponse:
+    try:
+        provider = normalize_provider_or_default(payload.provider)
+        validate_api_key_shape(provider, payload.api_key)
+    except AIKeyValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+
+    current_user.ai_provider = provider
+    current_user.ai_api_key_encrypted = encrypt_api_key(payload.api_key.strip())
+    session.add(current_user)
+    session.commit()
+    session.refresh(current_user)
+    return _ai_key_status(current_user)
+
+
+@router.delete("/user/ai-key", response_model=UserAIKeyDeleteResponse)
+def delete_user_ai_key(
+    current_user: Annotated[UserAccount, Depends(get_verified_user)],
+    session: Annotated[Session, Depends(get_session)],
+) -> UserAIKeyDeleteResponse:
+    current_user.ai_provider = None
+    current_user.ai_api_key_encrypted = None
+    session.add(current_user)
+    session.commit()
+    return UserAIKeyDeleteResponse(deleted=True)
+
+
+@router.post("/user/ai-key/test", response_model=UserAIKeyTestResponse)
+async def test_user_ai_key(
+    payload: UserAIKeyTestRequest,
+    current_user: Annotated[UserAccount, Depends(get_verified_user)],
+) -> UserAIKeyTestResponse:
+    provider = normalize_provider_or_default(payload.provider or current_user.ai_provider)
+
+    if payload.api_key and payload.api_key.strip():
+        raw_key = payload.api_key.strip()
+    elif current_user.ai_api_key_encrypted:
+        try:
+            raw_key = decrypt_api_key(current_user.ai_api_key_encrypted)
+        except AIKeyValidationError as exc:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+    else:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No API key configured")
+
+    ok, message = await test_provider_api_key(provider, raw_key)
+    if not ok:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message)
+
+    return UserAIKeyTestResponse(ok=True, provider=provider, message=message)
 
 
 @router.post("/profile", response_model=ProfileRead)

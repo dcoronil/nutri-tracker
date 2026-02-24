@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     smtp_use_tls: bool = True
     expose_verification_code: bool = True
     dev_email_mode: bool = True
+    ai_key_encryption_secret: str = "change-me-ai-key-secret"
+    openai_base_url: str = "https://api.openai.com/v1"
+    ai_provider_default: str = "openai"
+    ai_key_test_timeout_seconds: float = 8.0
 
 
 @lru_cache

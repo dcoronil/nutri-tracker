@@ -147,6 +147,32 @@ class AuthResponse(BaseModel):
     profile: ProfileRead | None = None
 
 
+class UserAIKeyUpsertRequest(BaseModel):
+    provider: Literal["openai", "gemini"] = "openai"
+    api_key: str = Field(min_length=16, max_length=4096)
+
+
+class UserAIKeyDeleteResponse(BaseModel):
+    deleted: bool
+
+
+class UserAIKeyStatusResponse(BaseModel):
+    configured: bool
+    provider: Literal["openai", "gemini"] | None = None
+    key_hint: str | None = None
+
+
+class UserAIKeyTestRequest(BaseModel):
+    provider: Literal["openai", "gemini"] | None = None
+    api_key: str | None = Field(default=None, min_length=16, max_length=4096)
+
+
+class UserAIKeyTestResponse(BaseModel):
+    ok: bool
+    provider: Literal["openai", "gemini"]
+    message: str
+
+
 class ProductPreference(BaseModel):
     method: IntakeMethod
     quantity_g: float | None = None

@@ -292,6 +292,18 @@ type MeResponse = {
   profile: Profile | null;
 };
 
+type UserAIKeyStatus = {
+  configured: boolean;
+  provider: "openai" | "gemini" | null;
+  key_hint: string | null;
+};
+
+type UserAIKeyTestResponse = {
+  ok: boolean;
+  provider: "openai" | "gemini";
+  message: string;
+};
+
 type ProfileInput = {
   weight_kg: number;
   height_cm: number;
@@ -345,6 +357,10 @@ type AuthContextValue = {
   saveGoal: (day: string, goal: GoalPayload) => Promise<DailyGoalResponse>;
   fetchDaySummary: (day: string) => Promise<DaySummary>;
   fetchCalendar: (yearMonth: string) => Promise<CalendarMonthResponse>;
+  fetchUserAIKeyStatus: () => Promise<UserAIKeyStatus>;
+  saveUserAIKey: (payload: { provider: "openai" | "gemini"; apiKey: string }) => Promise<UserAIKeyStatus>;
+  testUserAIKey: (payload: { provider?: "openai" | "gemini"; apiKey?: string }) => Promise<UserAIKeyTestResponse>;
+  deleteUserAIKey: () => Promise<void>;
   fetchProductDataQuality: (productId: number) => Promise<ProductDataQuality>;
   lookupByBarcode: (ean: string) => Promise<ProductLookupResponse>;
   createProductFromLabel: (input: {
@@ -898,6 +914,45 @@ function AuthProvider({ children }: { children: import("react").ReactNode }) {
     [request],
   );
 
+  const fetchUserAIKeyStatus = useCallback(
+    async (): Promise<UserAIKeyStatus> => request<UserAIKeyStatus>("/user/ai-key/status"),
+    [request],
+  );
+
+  const saveUserAIKey = useCallback(
+    async (payload: { provider: "openai" | "gemini"; apiKey: string }): Promise<UserAIKeyStatus> => {
+      return request<UserAIKeyStatus>("/user/ai-key", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          provider: payload.provider,
+          api_key: payload.apiKey,
+        }),
+      });
+    },
+    [request],
+  );
+
+  const testUserAIKey = useCallback(
+    async (payload: { provider?: "openai" | "gemini"; apiKey?: string }): Promise<UserAIKeyTestResponse> => {
+      return request<UserAIKeyTestResponse>("/user/ai-key/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          provider: payload.provider,
+          api_key: payload.apiKey,
+        }),
+      });
+    },
+    [request],
+  );
+
+  const deleteUserAIKey = useCallback(async (): Promise<void> => {
+    await request<{ deleted: boolean }>("/user/ai-key", {
+      method: "DELETE",
+    });
+  }, [request]);
+
   const fetchProductDataQuality = useCallback(
     async (productId: number): Promise<ProductDataQuality> =>
       request<ProductDataQuality>(`/products/${productId}/data-quality`),
@@ -1167,6 +1222,10 @@ function AuthProvider({ children }: { children: import("react").ReactNode }) {
       saveGoal,
       fetchDaySummary,
       fetchCalendar,
+      fetchUserAIKeyStatus,
+      saveUserAIKey,
+      testUserAIKey,
+      deleteUserAIKey,
       fetchProductDataQuality,
       lookupByBarcode,
       createProductFromLabel,
@@ -1193,10 +1252,14 @@ function AuthProvider({ children }: { children: import("react").ReactNode }) {
       correctProductFromLabel,
       mealEstimateQuestions,
       mealPhotoEstimate,
+      saveUserAIKey,
+      testUserAIKey,
+      deleteUserAIKey,
       fetchAnalysis,
       fetchBodySummary,
       fetchCalendar,
       fetchDaySummary,
+      fetchUserAIKeyStatus,
       fetchProductDataQuality,
       fetchMeasurementLogs,
       fetchGoal,
@@ -2839,9 +2902,15 @@ function SettingsScreen() {
   const [checking, setChecking] = useState(false);
   const [savingGoals, setSavingGoals] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
+  const [savingAIKey, setSavingAIKey] = useState(false);
+  const [testingAIKey, setTestingAIKey] = useState(false);
+  const [deletingAIKey, setDeletingAIKey] = useState(false);
   const [loadingMeta, setLoadingMeta] = useState(false);
   const [themeMode, setThemeMode] = useState<"dark" | "light">("dark");
   const [unitMode, setUnitMode] = useState<"metric" | "imperial">("metric");
+  const [aiProvider, setAiProvider] = useState<"openai" | "gemini">("openai");
+  const [aiKeyInput, setAiKeyInput] = useState("");
+  const [aiKeyStatus, setAiKeyStatus] = useState<UserAIKeyStatus | null>(null);
 
   const [goalDraft, setGoalDraft] = useState({
     kcal_goal: "",
@@ -2881,14 +2950,19 @@ function SettingsScreen() {
   const loadMeta = useCallback(async () => {
     setLoadingMeta(true);
     try {
-      const [goalResponse, analysis, bodySummary] = await Promise.all([
+      const [goalResponse, analysis, bodySummary, aiStatus] = await Promise.all([
         auth.fetchGoal(today),
         auth.fetchAnalysis(today),
         auth.fetchBodySummary(),
+        auth.fetchUserAIKeyStatus(),
       ]);
 
       setRecommendedGoal(analysis.recommended_goal);
       setBodyHints(bodySummary.hints);
+      setAiKeyStatus(aiStatus);
+      if (aiStatus.provider) {
+        setAiProvider(aiStatus.provider);
+      }
 
       if (goalResponse) {
         setGoalDraft({
@@ -3029,6 +3103,60 @@ function SettingsScreen() {
     }
   };
 
+  const saveAIKey = async () => {
+    if (!aiKeyInput.trim()) {
+      Alert.alert("IA", "Pega una API key válida.");
+      return;
+    }
+
+    setSavingAIKey(true);
+    try {
+      const statusPayload = await auth.saveUserAIKey({
+        provider: aiProvider,
+        apiKey: aiKeyInput.trim(),
+      });
+      setAiKeyStatus(statusPayload);
+      setAiKeyInput("");
+      Alert.alert("IA", "Clave guardada correctamente.");
+    } catch (error) {
+      Alert.alert("IA", parseApiError(error));
+    } finally {
+      setSavingAIKey(false);
+    }
+  };
+
+  const testAIKey = async () => {
+    setTestingAIKey(true);
+    try {
+      const response = await auth.testUserAIKey({
+        provider: aiProvider,
+        apiKey: aiKeyInput.trim() || undefined,
+      });
+      Alert.alert("IA", response.message);
+      const statusPayload = await auth.fetchUserAIKeyStatus();
+      setAiKeyStatus(statusPayload);
+    } catch (error) {
+      Alert.alert("IA", parseApiError(error));
+    } finally {
+      setTestingAIKey(false);
+    }
+  };
+
+  const deleteAIKey = async () => {
+    setDeletingAIKey(true);
+    try {
+      await auth.deleteUserAIKey();
+      setAiKeyInput("");
+      const statusPayload = await auth.fetchUserAIKeyStatus();
+      setAiKeyStatus(statusPayload);
+      Alert.alert("IA", "Clave eliminada.");
+    } catch (error) {
+      Alert.alert("IA", parseApiError(error));
+    } finally {
+      setDeletingAIKey(false);
+    }
+  };
+
   return (
     <SafeAreaView style={styles.screen}>
       <ScrollView contentContainerStyle={styles.mainScroll}>
@@ -3154,6 +3282,43 @@ function SettingsScreen() {
             keyboardType="numeric"
           />
           <PrimaryButton title="Guardar perfil" onPress={() => void saveProfile()} loading={savingProfile} />
+        </AppCard>
+
+        <AppCard>
+          <SectionHeader title="IA" subtitle="API key por usuario (BYOK)" />
+          <Text style={styles.helperText}>Tu clave se usa solo para procesar imágenes con IA.</Text>
+          <ChoiceRow
+            label="Proveedor IA"
+            value={aiProvider}
+            onChange={setAiProvider}
+            options={[
+              { label: "OpenAI", value: "openai" },
+              { label: "Gemini (futuro)", value: "gemini" },
+            ]}
+          />
+          <InputField
+            label="API key"
+            value={aiKeyInput}
+            onChangeText={setAiKeyInput}
+            autoCapitalize="none"
+            secureTextEntry
+            placeholder="sk-..."
+          />
+          <Text style={styles.helperText}>
+            Estado: {aiKeyStatus?.configured ? "configurada" : "sin configurar"}{" "}
+            {aiKeyStatus?.key_hint ? `(${aiKeyStatus.key_hint})` : ""}
+          </Text>
+          <PrimaryButton title="Guardar clave" onPress={() => void saveAIKey()} loading={savingAIKey} />
+          <SecondaryButton
+            title="Probar clave"
+            onPress={() => void testAIKey()}
+            disabled={testingAIKey || savingAIKey || deletingAIKey}
+          />
+          <SecondaryButton
+            title="Eliminar clave"
+            onPress={() => void deleteAIKey()}
+            disabled={deletingAIKey || savingAIKey || testingAIKey || !aiKeyStatus?.configured}
+          />
         </AppCard>
 
         <AppCard>
