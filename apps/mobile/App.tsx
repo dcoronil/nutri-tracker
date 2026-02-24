@@ -22,7 +22,9 @@ import Constants from "expo-constants";
 import * as ImagePicker from "expo-image-picker";
 import * as SecureStore from "expo-secure-store";
 import { StatusBar } from "expo-status-bar";
-import Svg, { Circle, G, Line, Rect, Text as SvgText } from "react-native-svg";
+import Svg, { Circle, G } from "react-native-svg";
+
+import { BodyAvatarSvg } from "./components/BodyAvatarSvg";
 
 type NutritionBasis = "per_100g" | "per_100ml" | "per_serving";
 type LookupSource = "local" | "openfoodfacts_imported" | "openfoodfacts_incomplete" | "not_found";
@@ -2578,69 +2580,6 @@ function DashboardScreen({
   );
 }
 
-function avatarColorByBmiCategory(category: string): string {
-  const normalized = category.toLowerCase();
-  if (normalized.includes("under")) {
-    return "#60a5fa";
-  }
-  if (normalized.includes("normal")) {
-    return "#34d399";
-  }
-  if (normalized.includes("over")) {
-    return "#fbbf24";
-  }
-  if (normalized.includes("obes")) {
-    return "#f87171";
-  }
-  return "#a3a3a3";
-}
-
-function bodyWidthScaleFromMetrics(bmi: number | null, bodyFatPercent: number | null): number {
-  const bmiFactor = bmi ? clamp((bmi - 18) / 20, 0, 1) : 0.4;
-  const fatFactor = bodyFatPercent ? clamp((bodyFatPercent - 10) / 25, 0, 1) : 0.4;
-  return 0.8 + (bmiFactor * 0.35 + fatFactor * 0.25);
-}
-
-function BodyAvatarFigure(props: { bmi: number | null; bmiCategory: string; bodyFatPercent: number | null }) {
-  const width = 220;
-  const height = 280;
-  const centerX = width / 2;
-  const color = avatarColorByBmiCategory(props.bmiCategory);
-  const widthScale = bodyWidthScaleFromMetrics(props.bmi, props.bodyFatPercent);
-  const torsoWidth = 68 * widthScale;
-  const torsoHeight = 114;
-  const torsoX = centerX - torsoWidth / 2;
-  const torsoY = 76;
-  const shoulderY = torsoY + 18;
-  const armReach = 44 * widthScale;
-  const legYStart = torsoY + torsoHeight;
-
-  return (
-    <View style={styles.bodyAvatarWrap}>
-      <Svg width={width} height={height}>
-        <Circle cx={centerX} cy={42} r={21} fill={color} opacity={0.95} />
-        <Rect x={torsoX} y={torsoY} width={torsoWidth} height={torsoHeight} rx={torsoWidth * 0.32} fill={color} opacity={0.86} />
-        <Line x1={torsoX + 8} y1={shoulderY} x2={torsoX - armReach} y2={shoulderY + 28} stroke={color} strokeWidth={10} strokeLinecap="round" />
-        <Line
-          x1={torsoX + torsoWidth - 8}
-          y1={shoulderY}
-          x2={torsoX + torsoWidth + armReach}
-          y2={shoulderY + 28}
-          stroke={color}
-          strokeWidth={10}
-          strokeLinecap="round"
-        />
-        <Line x1={centerX - torsoWidth * 0.2} y1={legYStart} x2={centerX - 24} y2={250} stroke={color} strokeWidth={12} strokeLinecap="round" />
-        <Line x1={centerX + torsoWidth * 0.2} y1={legYStart} x2={centerX + 24} y2={250} stroke={color} strokeWidth={12} strokeLinecap="round" />
-        <SvgText x={centerX} y={132} fill="#0b0b0b" fontSize="16" fontWeight="700" textAnchor="middle">
-          {props.bodyFatPercent ? `${props.bodyFatPercent.toFixed(1)}%` : "N/D"}
-        </SvgText>
-      </Svg>
-      <Text style={styles.bodyAvatarCaption}>IMC: {props.bmi ? props.bmi.toFixed(1) : "-"} · {props.bmiCategory}</Text>
-    </View>
-  );
-}
-
 function BodyProgressScreen() {
   const auth = useAuth();
   const [loading, setLoading] = useState(true);
@@ -2797,10 +2736,12 @@ function BodyProgressScreen() {
 
         <AppCard>
           <SectionHeader title="Avatar corporal" subtitle="Visual rápido según IMC y % grasa" />
-          <BodyAvatarFigure
+          <BodyAvatarSvg
             bmi={summary?.bmi ?? null}
             bmiCategory={summary?.bmi_category ?? "unknown"}
             bodyFatPercent={summary?.body_fat_percent ?? null}
+            latestWeightKg={summary?.latest_weight_kg ?? null}
+            weeklyChangeKg={summary?.weekly_change_kg ?? null}
           />
         </AppCard>
 
