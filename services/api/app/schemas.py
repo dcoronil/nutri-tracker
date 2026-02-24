@@ -351,9 +351,18 @@ class ProfileAnalysisResponse(BaseModel):
     goal_feedback_today: GoalFeedback | None = None
 
 
+class MealEstimateQuestion(BaseModel):
+    id: str
+    prompt: str
+    answer_type: Literal["single_choice", "number", "text"] = "text"
+    options: list[str] = Field(default_factory=list)
+    placeholder: str | None = None
+
+
 class MealEstimateQuestionsResponse(BaseModel):
     model_used: Literal["gpt-4o-mini"] = "gpt-4o-mini"
     questions: list[str] = Field(default_factory=list)
+    question_items: list[MealEstimateQuestion] = Field(default_factory=list)
     assumptions: list[str] = Field(default_factory=list)
     detected_ingredients: list[str] = Field(default_factory=list)
 
@@ -365,6 +374,7 @@ class MealPhotoEstimateResponse(BaseModel):
     analysis_method: Literal["ai_vision", "heuristic"] = "ai_vision"
     assumptions: list[str] = Field(default_factory=list)
     questions: list[str] = Field(default_factory=list)
+    question_items: list[MealEstimateQuestion] = Field(default_factory=list)
     detected_ingredients: list[str] = Field(default_factory=list)
     preview_nutrients: IntakeNutrients
     intake: IntakeRead | None = None

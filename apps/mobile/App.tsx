@@ -201,9 +201,18 @@ type ProductCorrectionResponse = {
   warnings?: string[];
 };
 
+type MealEstimateQuestion = {
+  id: string;
+  prompt: string;
+  answer_type: "single_choice" | "number" | "text";
+  options: string[];
+  placeholder: string | null;
+};
+
 type MealEstimateQuestionsResponse = {
   model_used: "gpt-4o-mini";
   questions: string[];
+  question_items: MealEstimateQuestion[];
   assumptions: string[];
   detected_ingredients: string[];
 };
@@ -263,6 +272,7 @@ type MealPhotoEstimateResponse = {
   analysis_method?: "ai_vision" | "heuristic";
   assumptions: string[];
   questions: string[];
+  question_items: MealEstimateQuestion[];
   detected_ingredients: string[];
   preview_nutrients: Nutrients;
   intake: Intake | null;
@@ -420,14 +430,25 @@ type AuthContextValue = {
     confirmUpdate?: boolean;
   }) => Promise<ProductCorrectionResponse>;
   mealEstimateQuestions: (input: {
-    description: string;
+    description?: string;
     portionSize?: "small" | "medium" | "large";
     hasAddedFats?: boolean;
     quantityNote?: string;
     photos: string[];
   }) => Promise<MealEstimateQuestionsResponse>;
+  mealPhotoEstimateCalculate: (input: {
+    description?: string;
+    answers?: Record<string, string>;
+    portionSize?: "small" | "medium" | "large";
+    hasAddedFats?: boolean;
+    quantityNote?: string;
+    photos: string[];
+    adjustPercent?: number;
+    commit?: boolean;
+  }) => Promise<MealPhotoEstimateResponse>;
   mealPhotoEstimate: (input: {
-    description: string;
+    description?: string;
+    answers?: Record<string, string>;
     portionSize?: "small" | "medium" | "large";
     hasAddedFats?: boolean;
     quantityNote?: string;
@@ -480,10 +501,10 @@ const theme = {
   danger: "#f48f8f",
   warning: "#f1d08e",
   ok: "#a9d8bb",
-  protein: "#60a5fa",
-  carbs: "#fbbf24",
-  fats: "#d8b4fe",
-  kcal: "#2dd4bf",
+  protein: "#4f8dfd",
+  carbs: "#f59e0b",
+  fats: "#f472b6",
+  kcal: "#2ed9c3",
   blue: "#b8b8b8",
   yellow: "#dcdcdc",
   red: "#f48f8f",
@@ -1150,14 +1171,14 @@ function AuthProvider({ children }: { children: import("react").ReactNode }) {
 
   const mealEstimateQuestions = useCallback(
     async (input: {
-      description: string;
+      description?: string;
       portionSize?: "small" | "medium" | "large";
       hasAddedFats?: boolean;
       quantityNote?: string;
       photos: string[];
     }): Promise<MealEstimateQuestionsResponse> => {
       const form = new FormData();
-      form.append("description", input.description.trim());
+      form.append("description", input.description?.trim() ?? "");
       if (input.portionSize) {
         form.append("portion_size", input.portionSize);
       }
@@ -1186,9 +1207,10 @@ function AuthProvider({ children }: { children: import("react").ReactNode }) {
     [request],
   );
 
-  const mealPhotoEstimate = useCallback(
+  const mealPhotoEstimateCalculate = useCallback(
     async (input: {
-      description: string;
+      description?: string;
+      answers?: Record<string, string>;
       portionSize?: "small" | "medium" | "large";
       hasAddedFats?: boolean;
       quantityNote?: string;
@@ -1197,7 +1219,60 @@ function AuthProvider({ children }: { children: import("react").ReactNode }) {
       commit?: boolean;
     }): Promise<MealPhotoEstimateResponse> => {
       const form = new FormData();
-      form.append("description", input.description.trim());
+      form.append("description", input.description?.trim() ?? "");
+      if (input.answers && Object.keys(input.answers).length > 0) {
+        form.append("answers_json", JSON.stringify(input.answers));
+      }
+      if (input.portionSize) {
+        form.append("portion_size", input.portionSize);
+      }
+      if (typeof input.hasAddedFats === "boolean") {
+        form.append("has_added_fats", String(input.hasAddedFats));
+      }
+      if (input.quantityNote?.trim()) {
+        form.append("quantity_note", input.quantityNote.trim());
+      }
+      if (typeof input.adjustPercent === "number") {
+        form.append("adjust_percent", String(Math.round(input.adjustPercent)));
+      }
+      if (input.commit) {
+        form.append("commit", "true");
+      }
+      input.photos.forEach((uri, index) => {
+        const name = uri.split("/").pop() || `meal-estimate-${index + 1}.jpg`;
+        form.append(
+          "photos",
+          {
+            uri,
+            name,
+            type: "image/jpeg",
+          } as unknown as Blob,
+        );
+      });
+      return request<MealPhotoEstimateResponse>("/meal-photo-estimate/calculate", {
+        method: "POST",
+        body: form,
+      });
+    },
+    [request],
+  );
+
+  const mealPhotoEstimate = useCallback(
+    async (input: {
+      description?: string;
+      answers?: Record<string, string>;
+      portionSize?: "small" | "medium" | "large";
+      hasAddedFats?: boolean;
+      quantityNote?: string;
+      photos: string[];
+      adjustPercent?: number;
+      commit?: boolean;
+    }): Promise<MealPhotoEstimateResponse> => {
+      const form = new FormData();
+      form.append("description", input.description?.trim() ?? "");
+      if (input.answers && Object.keys(input.answers).length > 0) {
+        form.append("answers_json", JSON.stringify(input.answers));
+      }
       if (input.portionSize) {
         form.append("portion_size", input.portionSize);
       }
@@ -1323,6 +1398,7 @@ function AuthProvider({ children }: { children: import("react").ReactNode }) {
       createProductFromLabel,
       correctProductFromLabel,
       mealEstimateQuestions,
+      mealPhotoEstimateCalculate,
       mealPhotoEstimate,
       createIntake,
       fetchBodySummary,
@@ -1343,6 +1419,7 @@ function AuthProvider({ children }: { children: import("react").ReactNode }) {
       createProductFromLabel,
       correctProductFromLabel,
       mealEstimateQuestions,
+      mealPhotoEstimateCalculate,
       mealPhotoEstimate,
       saveUserAIKey,
       testUserAIKey,
@@ -1525,6 +1602,14 @@ function EmptyState(props: { title: string; subtitle: string }) {
       <Text style={styles.emptyStateTitle}>{props.title}</Text>
       <Text style={styles.emptyStateSubtitle}>{props.subtitle}</Text>
     </AppCard>
+  );
+}
+
+function ToastFeedback(props: { kind: "success" | "error"; message: string }) {
+  return (
+    <View style={[styles.toastWrap, props.kind === "success" ? styles.toastSuccess : styles.toastError]}>
+      <Text style={styles.toastText}>{props.message}</Text>
+    </View>
   );
 }
 
@@ -3718,14 +3803,14 @@ function AddScreen() {
 
   const [mealDescription, setMealDescription] = useState("");
   const [mealPhotos, setMealPhotos] = useState<string[]>([]);
-  const [mealPortion, setMealPortion] = useState<"" | "small" | "medium" | "large">("");
-  const [mealAddedFat, setMealAddedFat] = useState<"unknown" | "yes" | "no">("unknown");
-  const [mealQuantityNote, setMealQuantityNote] = useState("");
+  const [mealStep, setMealStep] = useState<"compose" | "questions" | "result">("compose");
   const [mealAdjust, setMealAdjust] = useState(0);
-  const [mealQuestions, setMealQuestions] = useState<string[]>([]);
+  const [mealQuestions, setMealQuestions] = useState<MealEstimateQuestion[]>([]);
+  const [mealQuestionAnswers, setMealQuestionAnswers] = useState<Record<string, string>>({});
   const [mealAssumptions, setMealAssumptions] = useState<string[]>([]);
   const [mealIngredients, setMealIngredients] = useState<string[]>([]);
   const [mealPreview, setMealPreview] = useState<MealPhotoEstimateResponse | null>(null);
+  const [toastFeedback, setToastFeedback] = useState<{ kind: "success" | "error"; message: string } | null>(null);
 
   const [manualName, setManualName] = useState("");
   const [manualBrand, setManualBrand] = useState("");
@@ -3866,14 +3951,14 @@ function AddScreen() {
     resetScanState();
     setMealDescription("");
     setMealPhotos([]);
-    setMealPortion("");
-    setMealAddedFat("unknown");
-    setMealQuantityNote("");
+    setMealStep("compose");
     setMealAdjust(0);
     setMealQuestions([]);
+    setMealQuestionAnswers({});
     setMealAssumptions([]);
     setMealIngredients([]);
     setMealPreview(null);
+    setToastFeedback(null);
     setMode("meal_photo");
   };
 
@@ -4002,32 +4087,81 @@ function AddScreen() {
       return;
     }
     setMealPreview(null);
-    setMealPhotos((current) => [...current, firstAsset.uri]);
+    setMealPhotos([firstAsset.uri]);
+    setMealStep("compose");
+    setMealQuestions([]);
+    setMealQuestionAnswers({});
   };
 
-  const mealAddedFatFlag = mealAddedFat === "unknown" ? undefined : mealAddedFat === "yes";
+  const pickMealPhotoFromLibrary = async () => {
+    const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permissionResult.granted) {
+      Alert.alert("Permisos", "Necesitas permisos de galería para subir una foto.");
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.9,
+      allowsEditing: false,
+      selectionLimit: 1,
+    });
+    const firstAsset = result.canceled ? null : result.assets[0];
+    if (!firstAsset?.uri) {
+      return;
+    }
+    setMealPreview(null);
+    setMealPhotos([firstAsset.uri]);
+    setMealStep("compose");
+    setMealQuestions([]);
+    setMealQuestionAnswers({});
+  };
+
+  const removeMealPhoto = () => {
+    setMealPhotos([]);
+    setMealQuestions([]);
+    setMealQuestionAnswers({});
+    setMealAssumptions([]);
+    setMealIngredients([]);
+    setMealPreview(null);
+    setMealStep("compose");
+  };
 
   const runMealQuestions = async () => {
     const hasKey = await ensureAIKeyConfigured();
     if (!hasKey) {
       return;
     }
-    if (!mealDescription.trim()) {
-      Alert.alert("Estimación", "Añade una descripción breve de la comida.");
+    if (mealPhotos.length === 0) {
+      Alert.alert("Estimación", "Primero toma o sube una foto de la comida.");
       return;
     }
     setSaving(true);
     try {
       const response = await auth.mealEstimateQuestions({
-        description: mealDescription.trim(),
-        portionSize: mealPortion || undefined,
-        hasAddedFats: mealAddedFatFlag,
-        quantityNote: mealQuantityNote.trim() || undefined,
+        description: mealDescription.trim() || undefined,
         photos: mealPhotos,
       });
-      setMealQuestions(response.questions);
+      const normalizedQuestions =
+        response.question_items?.length > 0
+          ? response.question_items
+          : response.questions.slice(0, 3).map((prompt, index) => ({
+              id: `q_${index + 1}`,
+              prompt,
+              answer_type: "text" as const,
+              options: [],
+              placeholder: "Respuesta breve",
+            }));
+      const safeQuestions = normalizedQuestions.slice(0, 3);
+      setMealQuestions(safeQuestions);
+      setMealQuestionAnswers(
+        safeQuestions.reduce<Record<string, string>>((acc, item) => {
+          acc[item.id] = "";
+          return acc;
+        }, {}),
+      );
       setMealAssumptions(response.assumptions);
       setMealIngredients(response.detected_ingredients);
+      setMealStep("questions");
     } catch (error) {
       Alert.alert("Estimación", parseApiError(error));
     } finally {
@@ -4040,26 +4174,27 @@ function AddScreen() {
     if (!hasKey) {
       return;
     }
-    if (!mealDescription.trim()) {
-      Alert.alert("Estimación", "Añade una descripción breve de la comida.");
+    if (mealPhotos.length === 0) {
+      Alert.alert("Estimación", "Añade una foto antes de calcular.");
       return;
     }
     setSaving(true);
     try {
-      const response = await auth.mealPhotoEstimate({
-        description: mealDescription.trim(),
-        portionSize: mealPortion || undefined,
-        hasAddedFats: mealAddedFatFlag,
-        quantityNote: mealQuantityNote.trim() || undefined,
+      const response = await auth.mealPhotoEstimateCalculate({
+        description: mealDescription.trim() || undefined,
+        answers: mealQuestionAnswers,
         photos: mealPhotos,
         adjustPercent,
         commit: false,
       });
       setMealPreview(response);
-      setMealQuestions(response.questions);
+      if (response.question_items?.length) {
+        setMealQuestions(response.question_items);
+      }
       setMealAssumptions(response.assumptions);
       setMealIngredients(response.detected_ingredients);
       setMealAdjust(adjustPercent);
+      setMealStep("result");
     } catch (error) {
       Alert.alert("Estimación", parseApiError(error));
     } finally {
@@ -4072,17 +4207,15 @@ function AddScreen() {
     if (!hasKey) {
       return;
     }
-    if (!mealDescription.trim()) {
-      Alert.alert("Estimación", "Añade una descripción breve de la comida.");
+    if (mealPhotos.length === 0) {
+      Alert.alert("Estimación", "Añade una foto antes de guardar.");
       return;
     }
     setSaving(true);
     try {
       const response = await auth.mealPhotoEstimate({
-        description: mealDescription.trim(),
-        portionSize: mealPortion || undefined,
-        hasAddedFats: mealAddedFatFlag,
-        quantityNote: mealQuantityNote.trim() || undefined,
+        description: mealDescription.trim() || undefined,
+        answers: mealQuestionAnswers,
         photos: mealPhotos,
         adjustPercent: mealAdjust,
         commit: true,
@@ -4091,10 +4224,10 @@ function AddScreen() {
         Alert.alert("Estimación", "No se pudo guardar. Revisa las preguntas sugeridas.");
         return;
       }
-      Alert.alert("Estimación", "Comida estimada guardada correctamente.");
+      setToastFeedback({ kind: "success", message: "Consumo guardado correctamente." });
       resetToHub();
     } catch (error) {
-      Alert.alert("Estimación", parseApiError(error));
+      setToastFeedback({ kind: "error", message: parseApiError(error) });
     } finally {
       setSaving(false);
     }
@@ -4382,6 +4515,14 @@ function AddScreen() {
   }, [loadRecentProducts, mode]);
 
   useEffect(() => {
+    if (!toastFeedback) {
+      return;
+    }
+    const timer = setTimeout(() => setToastFeedback(null), 2600);
+    return () => clearTimeout(timer);
+  }, [toastFeedback]);
+
+  useEffect(() => {
     if (mode !== "barcode" || phase !== "quantity" || !product) {
       return;
     }
@@ -4611,123 +4752,170 @@ function AddScreen() {
         ) : null}
 
         {mode === "meal_photo" ? (
-          <ScrollView contentContainerStyle={styles.scanPane} keyboardShouldPersistTaps="handled">
-            <View style={styles.sectionCard}>
-              <Text style={styles.sectionTitle}>Estimar comida por foto</Text>
-              <Text style={styles.helperText}>
-                Estimación conservadora: kcal/grasas al alza y proteína/fibra a la baja. Revisa el preview y confirma antes de guardar.
-              </Text>
-              <InputField
-                label="Descripción (recomendada)"
-                value={mealDescription}
-                onChangeText={(value) => {
-                  setMealDescription(value);
-                  setMealPreview(null);
-                }}
-                placeholder="Ej: arroz con pollo y mayonesa"
-              />
-              <InputField
-                label="Cantidad aproximada (opcional)"
-                value={mealQuantityNote}
-                onChangeText={(value) => {
-                  setMealQuantityNote(value);
-                  setMealPreview(null);
-                }}
-                placeholder="Ej: 1 plato / 2 cucharadas"
-              />
-
-              <Text style={styles.helperText}>Modelo IA activo: gpt-4o-mini.</Text>
-
-              <Text style={styles.fieldLabel}>Tamaño de ración</Text>
-              <View style={styles.methodRow}>
-                {(["small", "medium", "large"] as const).map((portion) => (
-                  <Pressable
-                    key={portion}
-                    style={[styles.methodChip, mealPortion === portion && styles.methodChipActive]}
-                    onPress={() => {
-                      setMealPortion(portion);
+          <>
+            {mealStep === "compose" ? (
+              <ScrollView contentContainerStyle={styles.scanPane} keyboardShouldPersistTaps="handled">
+                <View style={styles.sectionCard}>
+                  <Text style={styles.sectionTitle}>Estimar comida por foto</Text>
+                  <Text style={styles.helperText}>1) Sube una foto 2) revisa preview 3) genera preguntas.</Text>
+                  {mealPhotos[0] ? (
+                    <View style={styles.mealPhotoPreviewWrap}>
+                      <Image source={{ uri: mealPhotos[0] }} style={styles.mealPhotoPreviewImage} resizeMode="contain" />
+                    </View>
+                  ) : (
+                    <View style={styles.mealPhotoPreviewEmpty}>
+                      <Text style={styles.helperText}>Aún no hay foto seleccionada.</Text>
+                    </View>
+                  )}
+                  <View style={styles.portionQuickRow}>
+                    <SecondaryButton title={mealPhotos[0] ? "Cambiar foto" : "Tomar foto"} onPress={() => void captureMealPhoto()} />
+                    <SecondaryButton title="Subir imagen" onPress={() => void pickMealPhotoFromLibrary()} />
+                  </View>
+                  {mealPhotos[0] ? <SecondaryButton title="Eliminar foto" onPress={removeMealPhoto} /> : null}
+                  <InputField
+                    label="Descripción (opcional)"
+                    value={mealDescription}
+                    onChangeText={(value) => {
+                      setMealDescription(value);
                       setMealPreview(null);
                     }}
-                  >
-                    <Text style={[styles.methodChipText, mealPortion === portion && styles.methodChipTextActive]}>
-                      {portion === "small" ? "Pequeña" : portion === "medium" ? "Media" : "Grande"}
-                    </Text>
-                  </Pressable>
-                ))}
+                    placeholder="Describe la comida (ej: arroz con pollo y mayonesa)"
+                  />
+                  <Text style={styles.helperText}>Una breve descripción mejora la precisión.</Text>
+                  <PrimaryButton title="Generar preguntas" onPress={() => void runMealQuestions()} loading={saving} disabled={!mealPhotos[0]} />
+                  <SecondaryButton title="Volver" onPress={resetToHub} disabled={saving} />
+                </View>
+              </ScrollView>
+            ) : null}
+
+            {mealStep === "questions" ? (
+              <View style={styles.mealQuestionScreen}>
+                <ScrollView contentContainerStyle={styles.mealQuestionContent} keyboardShouldPersistTaps="handled">
+                  <View style={styles.sectionCard}>
+                    <Text style={styles.sectionTitle}>Ayúdame a afinar la estimación</Text>
+                    <Text style={styles.helperText}>Responde 2-3 preguntas para mejorar la precisión.</Text>
+                  </View>
+                  {mealQuestions.map((question) => (
+                    <View key={question.id} style={styles.mealQuestionCard}>
+                      <Text style={styles.mealQuestionPrompt}>{question.prompt}</Text>
+                      {question.answer_type === "single_choice" ? (
+                        <View style={styles.methodRow}>
+                          {question.options.map((option) => {
+                            const active = (mealQuestionAnswers[question.id] ?? "") === option;
+                            return (
+                              <Pressable
+                                key={`${question.id}-${option}`}
+                                style={[styles.methodChip, active && styles.methodChipActive]}
+                                onPress={() =>
+                                  setMealQuestionAnswers((current) => ({
+                                    ...current,
+                                    [question.id]: option,
+                                  }))
+                                }
+                              >
+                                <Text style={[styles.methodChipText, active && styles.methodChipTextActive]}>{option}</Text>
+                              </Pressable>
+                            );
+                          })}
+                        </View>
+                      ) : (
+                        <TextInput
+                          value={mealQuestionAnswers[question.id] ?? ""}
+                          onChangeText={(value) =>
+                            setMealQuestionAnswers((current) => ({
+                              ...current,
+                              [question.id]: value,
+                            }))
+                          }
+                          keyboardType={question.answer_type === "number" ? "numeric" : "default"}
+                          style={styles.quantityInput}
+                          placeholder={question.placeholder ?? "Respuesta"}
+                          placeholderTextColor={theme.muted}
+                        />
+                      )}
+                    </View>
+                  ))}
+                  {mealIngredients.length > 0 ? (
+                    <Text style={styles.helperText}>Detectado: {mealIngredients.join(", ")}</Text>
+                  ) : null}
+                </ScrollView>
+                <View style={styles.bottomActionBar}>
+                  <SecondaryButton title="Volver" onPress={() => setMealStep("compose")} disabled={saving} />
+                  <PrimaryButton
+                    title="Calcular estimación"
+                    onPress={() => void runMealPreview()}
+                    loading={saving}
+                    disabled={mealQuestions.some((item) => !(mealQuestionAnswers[item.id] ?? "").trim())}
+                  />
+                </View>
               </View>
+            ) : null}
 
-              <Text style={styles.fieldLabel}>¿Aceites/salsas añadidas?</Text>
-              <View style={styles.methodRow}>
-                {([
-                  ["unknown", "No sé"],
-                  ["yes", "Sí"],
-                  ["no", "No"],
-                ] as const).map(([value, label]) => (
-                  <Pressable
-                    key={value}
-                    style={[styles.methodChip, mealAddedFat === value && styles.methodChipActive]}
-                    onPress={() => {
-                      setMealAddedFat(value);
-                      setMealPreview(null);
-                    }}
-                  >
-                    <Text style={[styles.methodChipText, mealAddedFat === value && styles.methodChipTextActive]}>{label}</Text>
-                  </Pressable>
-                ))}
-              </View>
-
-              <SecondaryButton title="Tomar foto de comida" onPress={() => void captureMealPhoto()} />
-              <Text style={styles.helperText}>{mealPhotos.length} foto(s) adjuntas</Text>
-
-              <PrimaryButton title="Generar preguntas" onPress={() => void runMealQuestions()} loading={saving} />
-              <SecondaryButton title="Previsualizar estimación" onPress={() => void runMealPreview()} disabled={saving} />
-
-              {mealIngredients.length > 0 ? (
-                <Text style={styles.helperText}>Ingredientes detectados: {mealIngredients.join(", ")}</Text>
-              ) : null}
-              {mealQuestions.map((question) => (
-                <Text key={question} style={styles.helperText}>
-                  - {question}
-                </Text>
-              ))}
-              {mealAssumptions.map((assumption) => (
-                <Text key={assumption} style={styles.helperText}>
-                  · {assumption}
-                </Text>
-              ))}
-
-              {mealPreview ? (
-                <AppCard style={styles.previewCard}>
-                  <SectionHeader title="Preview estimado" subtitle={`Confianza: ${mealPreview.confidence_level}`} />
-                  <Text style={styles.helperText}>
-                    Método: {mealPreview.analysis_method === "ai_vision" ? "IA visión" : "Heurístico"}
-                  </Text>
-                  <Text style={styles.helperText}>Modelo usado: {mealPreview.model_used}</Text>
-                  <View style={styles.previewRow}>
-                    <StatPill label="kcal" value={`${Math.round(mealPreview.preview_nutrients.kcal)}`} tone="warning" />
-                    <StatPill label="prote" value={`${Math.round(mealPreview.preview_nutrients.protein_g)} g`} />
-                    <StatPill label="carbs" value={`${Math.round(mealPreview.preview_nutrients.carbs_g)} g`} tone="warning" />
-                    <StatPill label="grasas" value={`${Math.round(mealPreview.preview_nutrients.fat_g)} g`} tone="danger" />
+            {mealStep === "result" && mealPreview ? (
+              <ScrollView contentContainerStyle={styles.scanPane} keyboardShouldPersistTaps="handled">
+                <View style={styles.sectionCard}>
+                  <Text style={styles.sectionTitle}>Estimación nutricional</Text>
+                  <TagChip
+                    label={`Confianza ${mealPreview.confidence_level}`}
+                    tone={mealPreview.confidence_level === "high" ? "accent" : mealPreview.confidence_level === "low" ? "danger" : "warning"}
+                  />
+                  {mealPhotos[0] ? <Image source={{ uri: mealPhotos[0] }} style={styles.mealResultImage} resizeMode="cover" /> : null}
+                  <TagChip label="Estimado (no exacto)" tone="warning" />
+                  <View style={styles.mealMetricsGrid}>
+                    <View style={styles.mealMetricCard}>
+                      <Text style={styles.mealMetricLabel}>kcal</Text>
+                      <Text style={[styles.mealMetricValue, { color: theme.kcal }]}>
+                        {Math.round(mealPreview.preview_nutrients.kcal)}
+                      </Text>
+                    </View>
+                    <View style={styles.mealMetricCard}>
+                      <Text style={styles.mealMetricLabel}>proteína</Text>
+                      <Text style={[styles.mealMetricValue, { color: theme.protein }]}>
+                        {Math.round(mealPreview.preview_nutrients.protein_g)} g
+                      </Text>
+                    </View>
+                    <View style={styles.mealMetricCard}>
+                      <Text style={styles.mealMetricLabel}>grasas</Text>
+                      <Text style={[styles.mealMetricValue, { color: theme.fats }]}>
+                        {Math.round(mealPreview.preview_nutrients.fat_g)} g
+                      </Text>
+                    </View>
+                    <View style={styles.mealMetricCard}>
+                      <Text style={styles.mealMetricLabel}>carbs</Text>
+                      <Text style={[styles.mealMetricValue, { color: theme.carbs }]}>
+                        {Math.round(mealPreview.preview_nutrients.carbs_g)} g
+                      </Text>
+                    </View>
                   </View>
                   <View style={styles.portionQuickRow}>
                     <Pressable style={styles.portionQuickChip} onPress={() => void runMealPreview(-10)}>
                       <Text style={styles.portionQuickChipText}>-10%</Text>
                     </Pressable>
                     <Pressable style={styles.portionQuickChip} onPress={() => void runMealPreview(0)}>
-                      <Text style={styles.portionQuickChipText}>Aceptar</Text>
+                      <Text style={styles.portionQuickChipText}>OK</Text>
                     </Pressable>
                     <Pressable style={styles.portionQuickChip} onPress={() => void runMealPreview(10)}>
                       <Text style={styles.portionQuickChipText}>+10%</Text>
                     </Pressable>
                   </View>
                   <Text style={styles.helperText}>Ajuste actual: {mealAdjust > 0 ? `+${mealAdjust}` : mealAdjust}%</Text>
-                  <PrimaryButton title="Guardar estimación" onPress={() => void saveMealEstimate()} loading={saving} />
-                </AppCard>
-              ) : null}
-
-              <SecondaryButton title="Volver" onPress={resetToHub} disabled={saving} />
-            </View>
-          </ScrollView>
+                  {mealIngredients.length ? (
+                    <Text style={styles.helperText}>Estimado a partir de: {mealIngredients.join(", ")}</Text>
+                  ) : null}
+                  {mealAssumptions.length
+                    ? mealAssumptions.map((assumption) => (
+                        <Text key={assumption} style={styles.helperText}>
+                          · {assumption}
+                        </Text>
+                      ))
+                    : null}
+                  <PrimaryButton title="Guardar consumo" onPress={() => void saveMealEstimate()} loading={saving} />
+                  <SecondaryButton title="Cambiar foto" onPress={() => setMealStep("compose")} disabled={saving} />
+                  <SecondaryButton title="Volver a Añadir" onPress={resetToHub} disabled={saving} />
+                </View>
+              </ScrollView>
+            ) : null}
+          </>
         ) : null}
 
         {mode === "manual" ? (
@@ -4949,6 +5137,7 @@ function AddScreen() {
           </ScrollView>
         ) : null}
       </View>
+      {toastFeedback ? <ToastFeedback kind={toastFeedback.kind} message={toastFeedback.message} /> : null}
     </SafeAreaView>
   );
 }
@@ -6149,6 +6338,103 @@ const styles = StyleSheet.create({
     paddingBottom: 100,
     gap: 12,
   },
+  mealPhotoPreviewWrap: {
+    width: "100%",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: "#0a0a0a",
+    minHeight: 250,
+    overflow: "hidden",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  mealPhotoPreviewImage: {
+    width: "100%",
+    height: 280,
+    backgroundColor: "#0a0a0a",
+  },
+  mealPhotoPreviewEmpty: {
+    width: "100%",
+    minHeight: 190,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: theme.panelSoft,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 14,
+  },
+  mealQuestionScreen: {
+    flex: 1,
+  },
+  mealQuestionContent: {
+    paddingBottom: 120,
+    gap: 10,
+  },
+  mealQuestionCard: {
+    borderWidth: 1,
+    borderColor: theme.border,
+    borderRadius: 16,
+    backgroundColor: theme.panel,
+    padding: 14,
+    gap: 10,
+  },
+  mealQuestionPrompt: {
+    color: theme.text,
+    fontSize: 14,
+    fontWeight: "700",
+    lineHeight: 20,
+  },
+  bottomActionBar: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    borderTopWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: "rgba(10,10,10,0.96)",
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    paddingBottom: 18,
+    gap: 8,
+  },
+  mealResultImage: {
+    width: "100%",
+    height: 140,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: "#0b0b0b",
+  },
+  mealMetricsGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  mealMetricCard: {
+    minWidth: 120,
+    flex: 1,
+    borderWidth: 1,
+    borderColor: theme.border,
+    borderRadius: 12,
+    backgroundColor: theme.panelSoft,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    gap: 4,
+  },
+  mealMetricLabel: {
+    color: theme.muted,
+    fontSize: 11,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+  },
+  mealMetricValue: {
+    color: theme.text,
+    fontSize: 18,
+    fontWeight: "800",
+  },
   searchResultsWrap: {
     marginTop: 2,
     marginBottom: 10,
@@ -6291,6 +6577,31 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 8,
+  },
+  toastWrap: {
+    position: "absolute",
+    left: 20,
+    right: 20,
+    bottom: 96,
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    zIndex: 100,
+  },
+  toastSuccess: {
+    backgroundColor: "rgba(45,212,191,0.14)",
+    borderColor: theme.kcal,
+  },
+  toastError: {
+    backgroundColor: "rgba(244,143,143,0.12)",
+    borderColor: theme.danger,
+  },
+  toastText: {
+    color: theme.text,
+    fontSize: 13,
+    fontWeight: "600",
+    textAlign: "center",
   },
   tabBar: {
     position: "absolute",

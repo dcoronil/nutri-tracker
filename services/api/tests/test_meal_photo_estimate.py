@@ -19,15 +19,25 @@ async def _mock_ai_estimate(
     quantity_note,
     photo_files,
     adjust_percent: int,
+    answers=None,
 ):
     assert api_key.startswith("sk-")
-    del description, portion_size, has_added_fats, quantity_note, photo_files
+    del description, portion_size, has_added_fats, quantity_note, photo_files, answers
     base_kcal = 530.0 + float(adjust_percent)
     return {
         "model_used": "gpt-4o-mini",
         "confidence_level": "medium",
         "analysis_method": "ai_vision",
         "questions": ["¿La ración era mediana o grande?"],
+        "question_items": [
+            {
+                "id": "portion_size",
+                "prompt": "¿Qué tamaño tenía la ración?",
+                "answer_type": "single_choice",
+                "options": ["small", "medium", "large"],
+                "placeholder": None,
+            }
+        ],
         "assumptions": ["Se consideró una ración media."],
         "detected_ingredients": ["arroz", "pollo"],
         "nutrition": {
@@ -43,12 +53,38 @@ async def _mock_ai_estimate(
     }
 
 
+async def _mock_ai_questions(
+    *,
+    api_key: str,
+    description: str,
+    photo_files,
+):
+    assert api_key.startswith("sk-")
+    del description, photo_files
+    return {
+        "model_used": "gpt-4o-mini",
+        "questions": ["¿Qué tamaño tenía la ración?"],
+        "question_items": [
+            {
+                "id": "portion_size",
+                "prompt": "¿Qué tamaño tenía la ración?",
+                "answer_type": "single_choice",
+                "options": ["small", "medium", "large"],
+                "placeholder": None,
+            }
+        ],
+        "assumptions": ["Se detectó un plato principal."],
+        "detected_ingredients": ["pollo", "arroz"],
+    }
+
+
 def test_meal_photo_requires_ai_key(client, auth_headers):
     response = client.post(
         "/meal-photo-estimate/questions",
         data={
             "description": "arroz con pollo",
         },
+        files=[("photos", ("meal.jpg", b"fake", "image/jpeg"))],
         headers=auth_headers,
     )
     assert response.status_code == 428
@@ -56,19 +92,21 @@ def test_meal_photo_requires_ai_key(client, auth_headers):
 
 def test_meal_photo_questions(client, auth_headers, monkeypatch):
     _configure_ai_key(client, auth_headers)
-    monkeypatch.setattr("app.api.routes.estimate_meal_with_ai", _mock_ai_estimate)
+    monkeypatch.setattr("app.api.routes.generate_meal_questions_with_ai", _mock_ai_questions)
 
     response = client.post(
         "/meal-photo-estimate/questions",
         data={
             "description": "arroz con pollo",
         },
+        files=[("photos", ("meal.jpg", b"fake", "image/jpeg"))],
         headers=auth_headers,
     )
     assert response.status_code == 200
     body = response.json()
     assert body["model_used"] == "gpt-4o-mini"
     assert isinstance(body["questions"], list)
+    assert isinstance(body["question_items"], list)
     assert "pollo" in body["detected_ingredients"]
 
 
@@ -77,7 +115,7 @@ def test_meal_photo_preview_and_commit(client, auth_headers, monkeypatch):
     monkeypatch.setattr("app.api.routes.estimate_meal_with_ai", _mock_ai_estimate)
 
     preview = client.post(
-        "/intakes/from-meal-photo-estimate",
+        "/meal-photo-estimate/calculate",
         data={
             "description": "arroz con pollo y mayonesa",
             "portion_size": "medium",
@@ -85,6 +123,7 @@ def test_meal_photo_preview_and_commit(client, auth_headers, monkeypatch):
             "adjust_percent": "0",
             "commit": "false",
         },
+        files=[("photos", ("meal.jpg", b"fake", "image/jpeg"))],
         headers=auth_headers,
     )
     assert preview.status_code == 200
@@ -105,6 +144,7 @@ def test_meal_photo_preview_and_commit(client, auth_headers, monkeypatch):
             "adjust_percent": "5",
             "commit": "true",
         },
+        files=[("photos", ("meal.jpg", b"fake", "image/jpeg"))],
         headers=auth_headers,
     )
     assert commit.status_code == 200

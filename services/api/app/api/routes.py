@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from datetime import UTC, date, datetime, time, timedelta
 from typing import Annotated, Literal
@@ -121,6 +122,7 @@ from app.services.vision_ai import (
     VisionAIError,
     estimate_meal_with_ai,
     extract_label_nutrition_with_ai,
+    generate_meal_questions_with_ai,
 )
 
 router = APIRouter()
@@ -287,6 +289,92 @@ async def _extract_label_payload(
 
     questions.extend(coherence_questions(extracted))
     return extracted, questions, warnings, analysis_method
+
+
+def _parse_meal_answers_json(raw: str | None) -> dict[str, str]:
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except Exception:
+        return {}
+
+    if not isinstance(parsed, dict):
+        return {}
+
+    answers: dict[str, str] = {}
+    for key, value in parsed.items():
+        normalized_key = str(key).strip()
+        normalized_value = str(value).strip()
+        if normalized_key and normalized_value:
+            answers[normalized_key] = normalized_value
+    return answers
+
+
+def _infer_portion_from_answers(answers: dict[str, str]) -> Literal["small", "medium", "large"] | None:
+    joined = " ".join(answers.values()).lower()
+    if "small" in joined or "peque" in joined:
+        return "small"
+    if "large" in joined or "grande" in joined:
+        return "large"
+    if "medium" in joined or "media" in joined or "mediana" in joined:
+        return "medium"
+    return None
+
+
+def _infer_added_fats_from_answers(answers: dict[str, str]) -> bool | None:
+    joined = " ".join(answers.values()).lower()
+    if any(token in joined for token in {"yes", "si", "sí"}):
+        return True
+    if "no" in joined:
+        return False
+    return None
+
+
+def _infer_quantity_note_from_answers(answers: dict[str, str]) -> str | None:
+    quantity_parts = [
+        value
+        for key, value in answers.items()
+        if any(token in key.lower() for token in {"qty", "quantity", "cantidad"})
+    ]
+    if not quantity_parts:
+        quantity_parts = [value for value in answers.values() if re.search(r"\d", value)]
+    joined = " | ".join(quantity_parts).strip()
+    return joined or None
+
+
+def _answers_to_context(answers: dict[str, str]) -> list[str]:
+    return [f"{key}: {value}" for key, value in answers.items() if key and value]
+
+
+def _resolve_meal_inputs(
+    *,
+    description: str | None,
+    answers_json: str | None,
+    portion_size: str | None,
+    has_added_fats: bool | None,
+    quantity_note: str | None,
+) -> tuple[str, Literal["small", "medium", "large"] | None, bool | None, str | None, list[str]]:
+    answers = _parse_meal_answers_json(answers_json)
+    normalized_portion: Literal["small", "medium", "large"] | None
+    normalized_portion = (
+        portion_size
+        if portion_size in {"small", "medium", "large"}
+        else _infer_portion_from_answers(answers)
+    )
+    normalized_added_fats = has_added_fats if has_added_fats is not None else _infer_added_fats_from_answers(answers)
+    normalized_quantity_note = (quantity_note or "").strip() or _infer_quantity_note_from_answers(answers)
+    answer_context = _answers_to_context(answers)
+
+    resolved_description = (description or "").strip()
+    if answer_context:
+        answer_text = " | ".join(answer_context)
+        resolved_description = f"{resolved_description}. {answer_text}" if resolved_description else answer_text
+
+    if not resolved_description:
+        resolved_description = "Comida estimada por foto"
+
+    return resolved_description, normalized_portion, normalized_added_fats, normalized_quantity_note, answer_context
 
 
 def get_current_user(
@@ -1485,10 +1573,7 @@ async def correct_product_by_barcode_from_label_photo(
 @router.post("/meal-photo-estimate/questions", response_model=MealEstimateQuestionsResponse)
 async def meal_photo_estimate_questions(
     current_user: Annotated[UserAccount, Depends(get_ready_user)],
-    description: Annotated[str, Form()],
-    portion_size: Annotated[str | None, Form()] = None,
-    has_added_fats: Annotated[bool | None, Form()] = None,
-    quantity_note: Annotated[str | None, Form()] = None,
+    description: Annotated[str | None, Form()] = None,
     photos: Annotated[list[UploadFile] | None, File()] = None,
 ) -> MealEstimateQuestionsResponse:
     ai_credentials = _user_ai_provider_and_key(current_user, required=True)
@@ -1498,16 +1583,15 @@ async def meal_photo_estimate_questions(
             detail="No AI credentials available",
         )
     _, api_key = ai_credentials
-    normalized_portion = portion_size if portion_size in {"small", "medium", "large"} else None
+    photo_files = photos or []
+    if not photo_files:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Adjunta al menos una foto.")
+
     try:
-        result = await estimate_meal_with_ai(
+        result = await generate_meal_questions_with_ai(
             api_key=api_key,
-            description=description,
-            portion_size=normalized_portion,  # type: ignore[arg-type]
-            has_added_fats=has_added_fats,
-            quantity_note=quantity_note,
-            photo_files=photos or [],
-            adjust_percent=0,
+            description=(description or "").strip(),
+            photo_files=photo_files,
         )
     except VisionAIError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
@@ -1515,8 +1599,36 @@ async def meal_photo_estimate_questions(
     return MealEstimateQuestionsResponse(
         model_used=result["model_used"],  # type: ignore[arg-type]
         questions=result["questions"],  # type: ignore[arg-type]
+        question_items=result.get("question_items", []),  # type: ignore[arg-type]
         assumptions=result["assumptions"],  # type: ignore[arg-type]
         detected_ingredients=result["detected_ingredients"],  # type: ignore[arg-type]
+    )
+
+
+@router.post("/meal-photo-estimate/calculate", response_model=MealPhotoEstimateResponse)
+async def meal_photo_estimate_calculate(
+    current_user: Annotated[UserAccount, Depends(get_ready_user)],
+    session: Annotated[Session, Depends(get_session)],
+    description: Annotated[str | None, Form()] = None,
+    answers_json: Annotated[str | None, Form()] = None,
+    portion_size: Annotated[str | None, Form()] = None,
+    has_added_fats: Annotated[bool | None, Form()] = None,
+    quantity_note: Annotated[str | None, Form()] = None,
+    adjust_percent: Annotated[int, Form()] = 0,
+    commit: Annotated[bool, Form()] = False,
+    photos: Annotated[list[UploadFile] | None, File()] = None,
+) -> MealPhotoEstimateResponse:
+    return await intake_from_meal_photo_estimate(
+        current_user=current_user,
+        session=session,
+        description=description,
+        answers_json=answers_json,
+        portion_size=portion_size,
+        has_added_fats=has_added_fats,
+        quantity_note=quantity_note,
+        adjust_percent=adjust_percent,
+        commit=commit,
+        photos=photos,
     )
 
 
@@ -1524,7 +1636,8 @@ async def meal_photo_estimate_questions(
 async def intake_from_meal_photo_estimate(
     current_user: Annotated[UserAccount, Depends(get_ready_user)],
     session: Annotated[Session, Depends(get_session)],
-    description: Annotated[str, Form()],
+    description: Annotated[str | None, Form()] = None,
+    answers_json: Annotated[str | None, Form()] = None,
     portion_size: Annotated[str | None, Form()] = None,
     has_added_fats: Annotated[bool | None, Form()] = None,
     quantity_note: Annotated[str | None, Form()] = None,
@@ -1540,17 +1653,30 @@ async def intake_from_meal_photo_estimate(
         )
     _, api_key = ai_credentials
 
-    normalized_portion = portion_size if portion_size in {"small", "medium", "large"} else None
+    photo_files = photos or []
+    if not photo_files:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Adjunta al menos una foto.")
+
+    resolved_description, normalized_portion, resolved_added_fats, resolved_quantity_note, answer_context = (
+        _resolve_meal_inputs(
+        description=description,
+        answers_json=answers_json,
+        portion_size=portion_size,
+        has_added_fats=has_added_fats,
+        quantity_note=quantity_note,
+        )
+    )
     normalized_adjust = max(-30, min(30, adjust_percent))
     try:
         result = await estimate_meal_with_ai(
             api_key=api_key,
-            description=description,
+            description=resolved_description,
             portion_size=normalized_portion,  # type: ignore[arg-type]
-            has_added_fats=has_added_fats,
-            quantity_note=quantity_note,
-            photo_files=photos or [],
+            has_added_fats=resolved_added_fats,
+            quantity_note=resolved_quantity_note,
+            photo_files=photo_files,
             adjust_percent=normalized_adjust,
+            answers=answer_context,
         )
     except VisionAIError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
@@ -1574,6 +1700,7 @@ async def intake_from_meal_photo_estimate(
         "analysis_method": result.get("analysis_method", "heuristic"),
         "assumptions": result["assumptions"],
         "questions": result["questions"],
+        "question_items": result.get("question_items", []),
         "detected_ingredients": result["detected_ingredients"],
         "preview_nutrients": preview_nutrients,
         "intake": None,
@@ -1586,8 +1713,8 @@ async def intake_from_meal_photo_estimate(
         "medium": 280.0,
         "large": 360.0,
     }.get(normalized_portion or "medium", 280.0)
-    if quantity_note:
-        match = re.search(r"(\\d+(?:[\\.,]\\d+)?)", quantity_note)
+    if resolved_quantity_note:
+        match = re.search(r"(\\d+(?:[\\.,]\\d+)?)", resolved_quantity_note)
         if match:
             try:
                 qty_factor = float(match.group(1).replace(",", "."))
@@ -1595,7 +1722,7 @@ async def intake_from_meal_photo_estimate(
             except ValueError:
                 pass
 
-    product_name = description.strip()
+    product_name = (description or "").strip()
     if not product_name:
         product_name = "Comida estimada"
 
@@ -1632,7 +1759,7 @@ async def intake_from_meal_photo_estimate(
         method=IntakeMethod.units,
         estimated=True,
         estimate_confidence=result["confidence_level"],  # type: ignore[arg-type]
-        user_description=description.strip(),
+        user_description=resolved_description,
         source_method="meal_photo",
         created_at=datetime.now(UTC),
     )
