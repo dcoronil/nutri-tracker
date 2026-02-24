@@ -34,6 +34,7 @@ type ActivityLevel = "sedentary" | "light" | "moderate" | "active" | "athlete";
 type GoalType = "lose" | "maintain" | "gain";
 type MainTab = "dashboard" | "add" | "body" | "history" | "settings";
 type AddMode = "hub" | "barcode" | "label_fix" | "meal_photo" | "manual";
+type MealModelOption = "gpt-4o-mini" | "gpt-5.1" | "auto";
 type AuthStackScreen = "welcome" | "signup" | "login";
 type OnboardingStep = 1 | 2 | 3;
 
@@ -202,6 +203,8 @@ type ProductCorrectionResponse = {
 };
 
 type MealEstimateQuestionsResponse = {
+  model_used: "gpt-4o-mini" | "gpt-5.1";
+  suggested_model: "gpt-5.1" | null;
   questions: string[];
   assumptions: string[];
   detected_ingredients: string[];
@@ -257,6 +260,8 @@ type Intake = {
 
 type MealPhotoEstimateResponse = {
   saved: boolean;
+  model_used: "gpt-4o-mini" | "gpt-5.1";
+  suggested_model: "gpt-5.1" | null;
   confidence_level: "high" | "medium" | "low";
   analysis_method?: "ai_vision" | "heuristic";
   assumptions: string[];
@@ -419,6 +424,7 @@ type AuthContextValue = {
   }) => Promise<ProductCorrectionResponse>;
   mealEstimateQuestions: (input: {
     description: string;
+    model?: MealModelOption;
     portionSize?: "small" | "medium" | "large";
     hasAddedFats?: boolean;
     quantityNote?: string;
@@ -426,6 +432,7 @@ type AuthContextValue = {
   }) => Promise<MealEstimateQuestionsResponse>;
   mealPhotoEstimate: (input: {
     description: string;
+    model?: MealModelOption;
     portionSize?: "small" | "medium" | "large";
     hasAddedFats?: boolean;
     quantityNote?: string;
@@ -464,6 +471,7 @@ type Segment = {
 };
 
 const TOKEN_STORAGE_KEY = "nutri_tracker_access_token";
+const MEAL_MODEL_STORAGE_KEY = "nutri_tracker_meal_model_pref";
 
 const theme = {
   bg: "#050505",
@@ -556,6 +564,17 @@ function parseApiError(error: unknown): string {
   }
 
   return error.message;
+}
+
+function normalizeMealModelOption(raw: string | null | undefined): MealModelOption {
+  const value = (raw ?? "").trim().toLowerCase();
+  if (value === "gpt-5.1") {
+    return "gpt-5.1";
+  }
+  if (value === "auto") {
+    return "auto";
+  }
+  return "gpt-4o-mini";
 }
 
 function formatDateLocal(day: Date): string {
@@ -1150,6 +1169,7 @@ function AuthProvider({ children }: { children: import("react").ReactNode }) {
   const mealEstimateQuestions = useCallback(
     async (input: {
       description: string;
+      model?: MealModelOption;
       portionSize?: "small" | "medium" | "large";
       hasAddedFats?: boolean;
       quantityNote?: string;
@@ -1157,6 +1177,9 @@ function AuthProvider({ children }: { children: import("react").ReactNode }) {
     }): Promise<MealEstimateQuestionsResponse> => {
       const form = new FormData();
       form.append("description", input.description.trim());
+      if (input.model) {
+        form.append("model", input.model);
+      }
       if (input.portionSize) {
         form.append("portion_size", input.portionSize);
       }
@@ -1188,6 +1211,7 @@ function AuthProvider({ children }: { children: import("react").ReactNode }) {
   const mealPhotoEstimate = useCallback(
     async (input: {
       description: string;
+      model?: MealModelOption;
       portionSize?: "small" | "medium" | "large";
       hasAddedFats?: boolean;
       quantityNote?: string;
@@ -1197,6 +1221,9 @@ function AuthProvider({ children }: { children: import("react").ReactNode }) {
     }): Promise<MealPhotoEstimateResponse> => {
       const form = new FormData();
       form.append("description", input.description.trim());
+      if (input.model) {
+        form.append("model", input.model);
+      }
       if (input.portionSize) {
         form.append("portion_size", input.portionSize);
       }
@@ -3716,6 +3743,7 @@ function AddScreen() {
 
   const [mealDescription, setMealDescription] = useState("");
   const [mealPhotos, setMealPhotos] = useState<string[]>([]);
+  const [mealModel, setMealModel] = useState<MealModelOption>("gpt-4o-mini");
   const [mealPortion, setMealPortion] = useState<"" | "small" | "medium" | "large">("");
   const [mealAddedFat, setMealAddedFat] = useState<"unknown" | "yes" | "no">("unknown");
   const [mealQuantityNote, setMealQuantityNote] = useState("");
@@ -3723,6 +3751,7 @@ function AddScreen() {
   const [mealQuestions, setMealQuestions] = useState<string[]>([]);
   const [mealAssumptions, setMealAssumptions] = useState<string[]>([]);
   const [mealIngredients, setMealIngredients] = useState<string[]>([]);
+  const [mealSuggestedModel, setMealSuggestedModel] = useState<"gpt-5.1" | null>(null);
   const [mealPreview, setMealPreview] = useState<MealPhotoEstimateResponse | null>(null);
 
   const [manualName, setManualName] = useState("");
@@ -3828,6 +3857,29 @@ function AddScreen() {
     }
   }, [auth, todayKey]);
 
+  useEffect(() => {
+    let active = true;
+    void SecureStore.getItemAsync(MEAL_MODEL_STORAGE_KEY)
+      .then((stored) => {
+        if (!active) {
+          return;
+        }
+        setMealModel(normalizeMealModelOption(stored));
+      })
+      .catch(() => {
+        // Keep default model when storage is unavailable.
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    void SecureStore.setItemAsync(MEAL_MODEL_STORAGE_KEY, mealModel).catch(() => {
+      // Preference persistence is best-effort.
+    });
+  }, [mealModel]);
+
   const startBarcodeFlow = async () => {
     resetScanState();
     setMode("barcode");
@@ -3871,6 +3923,7 @@ function AddScreen() {
     setMealQuestions([]);
     setMealAssumptions([]);
     setMealIngredients([]);
+    setMealSuggestedModel(null);
     setMealPreview(null);
     setMode("meal_photo");
   };
@@ -4018,6 +4071,7 @@ function AddScreen() {
     try {
       const response = await auth.mealEstimateQuestions({
         description: mealDescription.trim(),
+        model: mealModel,
         portionSize: mealPortion || undefined,
         hasAddedFats: mealAddedFatFlag,
         quantityNote: mealQuantityNote.trim() || undefined,
@@ -4026,6 +4080,7 @@ function AddScreen() {
       setMealQuestions(response.questions);
       setMealAssumptions(response.assumptions);
       setMealIngredients(response.detected_ingredients);
+      setMealSuggestedModel(response.suggested_model);
     } catch (error) {
       Alert.alert("Estimación", parseApiError(error));
     } finally {
@@ -4046,6 +4101,7 @@ function AddScreen() {
     try {
       const response = await auth.mealPhotoEstimate({
         description: mealDescription.trim(),
+        model: mealModel,
         portionSize: mealPortion || undefined,
         hasAddedFats: mealAddedFatFlag,
         quantityNote: mealQuantityNote.trim() || undefined,
@@ -4057,6 +4113,7 @@ function AddScreen() {
       setMealQuestions(response.questions);
       setMealAssumptions(response.assumptions);
       setMealIngredients(response.detected_ingredients);
+      setMealSuggestedModel(response.suggested_model);
       setMealAdjust(adjustPercent);
     } catch (error) {
       Alert.alert("Estimación", parseApiError(error));
@@ -4078,6 +4135,7 @@ function AddScreen() {
     try {
       const response = await auth.mealPhotoEstimate({
         description: mealDescription.trim(),
+        model: mealModel,
         portionSize: mealPortion || undefined,
         hasAddedFats: mealAddedFatFlag,
         quantityNote: mealQuantityNote.trim() || undefined,
@@ -4634,6 +4692,40 @@ function AddScreen() {
                 placeholder="Ej: 1 plato / 2 cucharadas"
               />
 
+              <Text style={styles.fieldLabel}>Modelo IA</Text>
+              <View style={styles.methodRow}>
+                {([
+                  ["gpt-4o-mini", "4o mini (rápido/barato)"],
+                  ["gpt-5.1", "5.1 (más preciso)"],
+                  ["auto", "Auto (sugerido)"],
+                ] as const).map(([value, label]) => (
+                  <Pressable
+                    key={value}
+                    style={[styles.methodChip, mealModel === value && styles.methodChipActive]}
+                    onPress={() => {
+                      setMealModel(value);
+                      setMealPreview(null);
+                      setMealSuggestedModel(null);
+                    }}
+                  >
+                    <Text style={[styles.methodChipText, mealModel === value && styles.methodChipTextActive]}>{label}</Text>
+                  </Pressable>
+                ))}
+              </View>
+              <Text style={styles.helperText}>Usa 5.1 para fotos difíciles o cuando necesites mayor precisión.</Text>
+              {mealSuggestedModel && mealModel !== mealSuggestedModel ? (
+                <Pressable
+                  style={styles.modelSuggestionCard}
+                  onPress={() => {
+                    setMealModel(mealSuggestedModel);
+                    setMealPreview(null);
+                  }}
+                >
+                  <Text style={styles.modelSuggestionTitle}>Confianza baja detectada</Text>
+                  <Text style={styles.modelSuggestionText}>Cambiar a {mealSuggestedModel} para mejorar precisión</Text>
+                </Pressable>
+              ) : null}
+
               <Text style={styles.fieldLabel}>Tamaño de ración</Text>
               <View style={styles.methodRow}>
                 {(["small", "medium", "large"] as const).map((portion) => (
@@ -4698,6 +4790,10 @@ function AddScreen() {
                   <Text style={styles.helperText}>
                     Método: {mealPreview.analysis_method === "ai_vision" ? "IA visión" : "Heurístico"}
                   </Text>
+                  <Text style={styles.helperText}>Modelo usado: {mealPreview.model_used}</Text>
+                  {mealPreview.suggested_model && mealModel !== mealPreview.suggested_model ? (
+                    <Text style={styles.helperText}>Sugerencia: prueba {mealPreview.suggested_model} para más precisión.</Text>
+                  ) : null}
                   <View style={styles.previewRow}>
                     <StatPill label="kcal" value={`${Math.round(mealPreview.preview_nutrients.kcal)}`} tone="warning" />
                     <StatPill label="prote" value={`${Math.round(mealPreview.preview_nutrients.protein_g)} g`} />
@@ -6222,6 +6318,24 @@ const styles = StyleSheet.create({
   },
   methodChipTextActive: {
     color: theme.text,
+  },
+  modelSuggestionCard: {
+    borderWidth: 1,
+    borderColor: theme.border,
+    borderRadius: 12,
+    backgroundColor: theme.panelSoft,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 2,
+  },
+  modelSuggestionTitle: {
+    color: theme.text,
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  modelSuggestionText: {
+    color: theme.muted,
+    fontSize: 12,
   },
   sliderWrap: {
     gap: 8,

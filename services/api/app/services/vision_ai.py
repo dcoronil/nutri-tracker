@@ -13,10 +13,37 @@ from app.services.meal_estimate import estimate_meal
 from app.services.nutrition import sanitize_numeric_values
 
 ConfidenceLevel = Literal["high", "medium", "low"]
+VisionModel = Literal["gpt-4o-mini", "gpt-5.1"]
+MealModelPreference = Literal["gpt-4o-mini", "gpt-5.1", "auto"]
+SUPPORTED_VISION_MODELS = {"gpt-4o-mini", "gpt-5.1"}
 
 
 class VisionAIError(RuntimeError):
     pass
+
+
+def _resolve_openai_vision_model(
+    model: str | None,
+    *,
+    fallback: str | None = None,
+    default: VisionModel = "gpt-4o-mini",
+) -> VisionModel:
+    for candidate in (model, fallback):
+        normalized = (candidate or "").strip().lower()
+        if not normalized:
+            continue
+        if normalized in SUPPORTED_VISION_MODELS:
+            return normalized  # type: ignore[return-value]
+    return default
+
+
+def _normalize_meal_model_preference(model_preference: str | None) -> MealModelPreference:
+    normalized = (model_preference or "").strip().lower()
+    if not normalized:
+        return "gpt-4o-mini"
+    if normalized not in {"gpt-4o-mini", "gpt-5.1", "auto"}:
+        raise VisionAIError("Modelo no soportado. Usa gpt-4o-mini, gpt-5.1 o auto.")
+    return normalized  # type: ignore[return-value]
 
 
 def _extract_json_blob(text: str) -> dict[str, Any]:
@@ -110,6 +137,7 @@ async def _image_urls_from_uploads(photo_files: list[UploadFile]) -> list[str]:
 async def _openai_json_chat(
     *,
     api_key: str,
+    model: VisionModel,
     system_prompt: str,
     user_prompt: str,
     photo_files: list[UploadFile],
@@ -123,7 +151,7 @@ async def _openai_json_chat(
         user_content.append({"type": "image_url", "image_url": {"url": image_url}})
 
     payload = {
-        "model": settings.openai_vision_model,
+        "model": model,
         "temperature": 0,
         "max_tokens": max_tokens,
         "response_format": {"type": "json_object"},
@@ -173,7 +201,11 @@ async def extract_label_nutrition_with_ai(
     label_text: str,
     photo_files: list[UploadFile],
     basis_hint: NutritionBasis | None,
+    model: str | None = None,
 ) -> dict[str, Any]:
+    settings = get_settings()
+    selected_model = _resolve_openai_vision_model(model, fallback=settings.openai_vision_model)
+
     system_prompt = (
         "Eres un extractor estricto de tablas nutricionales. "
         "Devuelve solo JSON válido sin texto extra."
@@ -194,6 +226,7 @@ async def extract_label_nutrition_with_ai(
 
     data = await _openai_json_chat(
         api_key=api_key,
+        model=selected_model,
         system_prompt=system_prompt,
         user_prompt=user_prompt,
         photo_files=photo_files,
@@ -237,7 +270,11 @@ async def estimate_meal_with_ai(
     quantity_note: str | None,
     photo_files: list[UploadFile],
     adjust_percent: int,
+    model_preference: str | None,
 ) -> dict[str, Any]:
+    preference = _normalize_meal_model_preference(model_preference)
+    model_used = "gpt-4o-mini" if preference in {"gpt-4o-mini", "auto"} else "gpt-5.1"
+
     portion_text = portion_size or "unknown"
     added_fat_text = "unknown" if has_added_fats is None else ("yes" if has_added_fats else "no")
 
@@ -262,6 +299,7 @@ async def estimate_meal_with_ai(
 
     data = await _openai_json_chat(
         api_key=api_key,
+        model=model_used,
         system_prompt=system_prompt,
         user_prompt=user_prompt,
         photo_files=photo_files,
@@ -323,7 +361,14 @@ async def estimate_meal_with_ai(
     if not ingredients:
         ingredients = [str(item) for item in heuristic_fallback["detected_ingredients"]]
 
+    suggested_model: VisionModel | None = None
+    if confidence_level == "low" and model_used == "gpt-4o-mini":
+        suggested_model = "gpt-5.1"
+        questions.append("Confianza baja: prueba gpt-5.1 para más precisión.")
+
     return {
+        "model_used": model_used,
+        "suggested_model": suggested_model,
         "confidence_level": confidence_level,
         "analysis_method": "ai_vision",
         "questions": questions,

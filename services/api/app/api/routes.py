@@ -1486,6 +1486,7 @@ async def correct_product_by_barcode_from_label_photo(
 async def meal_photo_estimate_questions(
     current_user: Annotated[UserAccount, Depends(get_ready_user)],
     description: Annotated[str, Form()],
+    model: Annotated[str | None, Form()] = None,
     portion_size: Annotated[str | None, Form()] = None,
     has_added_fats: Annotated[bool | None, Form()] = None,
     quantity_note: Annotated[str | None, Form()] = None,
@@ -1508,11 +1509,14 @@ async def meal_photo_estimate_questions(
             quantity_note=quantity_note,
             photo_files=photos or [],
             adjust_percent=0,
+            model_preference=model,
         )
     except VisionAIError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
     return MealEstimateQuestionsResponse(
+        model_used=result["model_used"],  # type: ignore[arg-type]
+        suggested_model=result.get("suggested_model"),  # type: ignore[arg-type]
         questions=result["questions"],  # type: ignore[arg-type]
         assumptions=result["assumptions"],  # type: ignore[arg-type]
         detected_ingredients=result["detected_ingredients"],  # type: ignore[arg-type]
@@ -1524,6 +1528,7 @@ async def intake_from_meal_photo_estimate(
     current_user: Annotated[UserAccount, Depends(get_ready_user)],
     session: Annotated[Session, Depends(get_session)],
     description: Annotated[str, Form()],
+    model: Annotated[str | None, Form()] = None,
     portion_size: Annotated[str | None, Form()] = None,
     has_added_fats: Annotated[bool | None, Form()] = None,
     quantity_note: Annotated[str | None, Form()] = None,
@@ -1550,6 +1555,7 @@ async def intake_from_meal_photo_estimate(
             quantity_note=quantity_note,
             photo_files=photos or [],
             adjust_percent=normalized_adjust,
+            model_preference=model,
         )
     except VisionAIError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
@@ -1568,6 +1574,8 @@ async def intake_from_meal_photo_estimate(
 
     response_base = {
         "saved": False,
+        "model_used": result["model_used"],
+        "suggested_model": result.get("suggested_model"),
         "confidence_level": result["confidence_level"],
         "analysis_method": result.get("analysis_method", "heuristic"),
         "assumptions": result["assumptions"],

@@ -14,6 +14,7 @@ async def _mock_ai_estimate(
     *,
     api_key: str,
     description: str,
+    model_preference: str | None,
     portion_size,
     has_added_fats,
     quantity_note,
@@ -21,9 +22,13 @@ async def _mock_ai_estimate(
     adjust_percent: int,
 ):
     assert api_key.startswith("sk-")
+    model_used = model_preference if model_preference in {"gpt-4o-mini", "gpt-5.1"} else "gpt-4o-mini"
+    suggested_model = "gpt-5.1" if model_used == "gpt-4o-mini" else None
     del description, portion_size, has_added_fats, quantity_note, photo_files
     base_kcal = 530.0 + float(adjust_percent)
     return {
+        "model_used": model_used,
+        "suggested_model": suggested_model,
         "confidence_level": "medium",
         "analysis_method": "ai_vision",
         "questions": ["¿La ración era mediana o grande?"],
@@ -66,8 +71,21 @@ def test_meal_photo_questions(client, auth_headers, monkeypatch):
     )
     assert response.status_code == 200
     body = response.json()
+    assert body["model_used"] == "gpt-4o-mini"
+    assert body["suggested_model"] == "gpt-5.1"
     assert isinstance(body["questions"], list)
     assert "pollo" in body["detected_ingredients"]
+
+    high_precision = client.post(
+        "/meal-photo-estimate/questions",
+        data={
+            "description": "arroz con pollo",
+            "model": "gpt-5.1",
+        },
+        headers=auth_headers,
+    )
+    assert high_precision.status_code == 200
+    assert high_precision.json()["model_used"] == "gpt-5.1"
 
 
 def test_meal_photo_preview_and_commit(client, auth_headers, monkeypatch):
@@ -88,6 +106,7 @@ def test_meal_photo_preview_and_commit(client, auth_headers, monkeypatch):
     assert preview.status_code == 200
     preview_body = preview.json()
     assert preview_body["saved"] is False
+    assert preview_body["model_used"] == "gpt-4o-mini"
     assert preview_body["intake"] is None
     assert preview_body["preview_nutrients"]["kcal"] > 0
     assert preview_body["analysis_method"] == "ai_vision"

@@ -352,6 +352,8 @@ class ProfileAnalysisResponse(BaseModel):
 
 
 class MealEstimateQuestionsResponse(BaseModel):
+    model_used: Literal["gpt-4o-mini", "gpt-5.1"] = "gpt-4o-mini"
+    suggested_model: Literal["gpt-5.1"] | None = None
     questions: list[str] = Field(default_factory=list)
     assumptions: list[str] = Field(default_factory=list)
     detected_ingredients: list[str] = Field(default_factory=list)
@@ -359,6 +361,8 @@ class MealEstimateQuestionsResponse(BaseModel):
 
 class MealPhotoEstimateResponse(BaseModel):
     saved: bool
+    model_used: Literal["gpt-4o-mini", "gpt-5.1"] = "gpt-4o-mini"
+    suggested_model: Literal["gpt-5.1"] | None = None
     confidence_level: Literal["high", "medium", "low"]
     analysis_method: Literal["ai_vision", "heuristic"] = "ai_vision"
     assumptions: list[str] = Field(default_factory=list)
