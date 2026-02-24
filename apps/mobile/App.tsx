@@ -22,7 +22,7 @@ import Constants from "expo-constants";
 import * as ImagePicker from "expo-image-picker";
 import * as SecureStore from "expo-secure-store";
 import { StatusBar } from "expo-status-bar";
-import Svg, { Circle, G } from "react-native-svg";
+import Svg, { Circle, G, Line, Rect, Text as SvgText } from "react-native-svg";
 
 type NutritionBasis = "per_100g" | "per_100ml" | "per_serving";
 type LookupSource = "local" | "openfoodfacts_imported" | "openfoodfacts_incomplete" | "not_found";
@@ -30,7 +30,7 @@ type IntakeMethod = "grams" | "percent_pack" | "units";
 type Sex = "male" | "female" | "other";
 type ActivityLevel = "sedentary" | "light" | "moderate" | "active" | "athlete";
 type GoalType = "lose" | "maintain" | "gain";
-type MainTab = "dashboard" | "add" | "progress" | "history" | "settings";
+type MainTab = "dashboard" | "add" | "body" | "history" | "settings";
 type AddMode = "hub" | "barcode" | "label_fix" | "meal_photo" | "manual";
 type AuthStackScreen = "welcome" | "signup" | "login";
 type OnboardingStep = 1 | 2 | 3;
@@ -2487,6 +2487,69 @@ function DashboardScreen({
   );
 }
 
+function avatarColorByBmiCategory(category: string): string {
+  const normalized = category.toLowerCase();
+  if (normalized.includes("under")) {
+    return "#60a5fa";
+  }
+  if (normalized.includes("normal")) {
+    return "#34d399";
+  }
+  if (normalized.includes("over")) {
+    return "#fbbf24";
+  }
+  if (normalized.includes("obes")) {
+    return "#f87171";
+  }
+  return "#a3a3a3";
+}
+
+function bodyWidthScaleFromMetrics(bmi: number | null, bodyFatPercent: number | null): number {
+  const bmiFactor = bmi ? clamp((bmi - 18) / 20, 0, 1) : 0.4;
+  const fatFactor = bodyFatPercent ? clamp((bodyFatPercent - 10) / 25, 0, 1) : 0.4;
+  return 0.8 + (bmiFactor * 0.35 + fatFactor * 0.25);
+}
+
+function BodyAvatarFigure(props: { bmi: number | null; bmiCategory: string; bodyFatPercent: number | null }) {
+  const width = 220;
+  const height = 280;
+  const centerX = width / 2;
+  const color = avatarColorByBmiCategory(props.bmiCategory);
+  const widthScale = bodyWidthScaleFromMetrics(props.bmi, props.bodyFatPercent);
+  const torsoWidth = 68 * widthScale;
+  const torsoHeight = 114;
+  const torsoX = centerX - torsoWidth / 2;
+  const torsoY = 76;
+  const shoulderY = torsoY + 18;
+  const armReach = 44 * widthScale;
+  const legYStart = torsoY + torsoHeight;
+
+  return (
+    <View style={styles.bodyAvatarWrap}>
+      <Svg width={width} height={height}>
+        <Circle cx={centerX} cy={42} r={21} fill={color} opacity={0.95} />
+        <Rect x={torsoX} y={torsoY} width={torsoWidth} height={torsoHeight} rx={torsoWidth * 0.32} fill={color} opacity={0.86} />
+        <Line x1={torsoX + 8} y1={shoulderY} x2={torsoX - armReach} y2={shoulderY + 28} stroke={color} strokeWidth={10} strokeLinecap="round" />
+        <Line
+          x1={torsoX + torsoWidth - 8}
+          y1={shoulderY}
+          x2={torsoX + torsoWidth + armReach}
+          y2={shoulderY + 28}
+          stroke={color}
+          strokeWidth={10}
+          strokeLinecap="round"
+        />
+        <Line x1={centerX - torsoWidth * 0.2} y1={legYStart} x2={centerX - 24} y2={250} stroke={color} strokeWidth={12} strokeLinecap="round" />
+        <Line x1={centerX + torsoWidth * 0.2} y1={legYStart} x2={centerX + 24} y2={250} stroke={color} strokeWidth={12} strokeLinecap="round" />
+        <SvgText x={centerX} y={132} fill="#0b0b0b" fontSize="16" fontWeight="700" textAnchor="middle">
+          {props.bodyFatPercent ? `${props.bodyFatPercent.toFixed(1)}%` : "N/D"}
+        </SvgText>
+      </Svg>
+      <Text style={styles.bodyAvatarCaption}>IMC: {props.bmi ? props.bmi.toFixed(1) : "-"} · {props.bmiCategory}</Text>
+    </View>
+  );
+}
+
 function BodyProgressScreen() {
   const auth = useAuth();
   const [loading, setLoading] = useState(true);
@@ -2543,6 +2606,39 @@ function BodyProgressScreen() {
     return { min: Math.min(...values), max: Math.max(...values) };
   }, [filteredWeightLogs]);
 
+  const filteredBodyFatPoints = useMemo(() => {
+    if (!auth.profile) {
+      return [];
+    }
+    const days = range === "7d" ? 7 : range === "30d" ? 30 : 90;
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - days);
+
+    return [...measurementLogs]
+      .filter((row) => new Date(row.created_at) >= cutoff)
+      .sort((a, b) => +new Date(a.created_at) - +new Date(b.created_at))
+      .map((row) => ({
+        id: row.id,
+        date: row.created_at,
+        value: estimateBodyFatPreview({
+          sex: auth.profile?.sex ?? "other",
+          heightCm: auth.profile?.height_cm ?? null,
+          waistCm: row.waist_cm,
+          neckCm: row.neck_cm,
+          hipCm: row.hip_cm,
+        }),
+      }))
+      .filter((row) => row.value !== null) as Array<{ id: number; date: string; value: number }>;
+  }, [auth.profile, measurementLogs, range]);
+
+  const bodyFatStats = useMemo(() => {
+    if (filteredBodyFatPoints.length === 0) {
+      return { min: 0, max: 0 };
+    }
+    const values = filteredBodyFatPoints.map((row) => row.value);
+    return { min: Math.min(...values), max: Math.max(...values) };
+  }, [filteredBodyFatPoints]);
+
   const saveWeight = async () => {
     const value = toPositiveNumberOrNull(weightInput);
     if (!value) {
@@ -2589,7 +2685,7 @@ function BodyProgressScreen() {
   return (
     <SafeAreaView style={styles.screen}>
       <ScrollView contentContainerStyle={styles.mainScroll}>
-        <SectionHeader title="Progreso corporal" subtitle="Peso, IMC y composición" actionLabel="Recargar" onAction={() => void reload()} />
+        <SectionHeader title="Cuerpo" subtitle="Peso, IMC y composición" actionLabel="Recargar" onAction={() => void reload()} />
 
         <AppCard>
           <SectionHeader title="Resumen actual" subtitle="Visión de un vistazo" />
@@ -2606,6 +2702,15 @@ function BodyProgressScreen() {
           {summary?.needs_weight_checkin ? (
             <Text style={styles.helperText}>Recomendación: registra peso al menos 1 vez por semana.</Text>
           ) : null}
+        </AppCard>
+
+        <AppCard>
+          <SectionHeader title="Avatar corporal" subtitle="Visual rápido según IMC y % grasa" />
+          <BodyAvatarFigure
+            bmi={summary?.bmi ?? null}
+            bmiCategory={summary?.bmi_category ?? "unknown"}
+            bodyFatPercent={summary?.body_fat_percent ?? null}
+          />
         </AppCard>
 
         <AppCard>
@@ -2637,6 +2742,30 @@ function BodyProgressScreen() {
                   <View key={entry.id} style={styles.weightBarCol}>
                     <View style={[styles.weightBar, { height }]} />
                     <Text style={styles.weightBarLabel}>{new Date(entry.created_at).getDate()}</Text>
+                  </View>
+                );
+              })}
+            </View>
+          )}
+        </AppCard>
+
+        <AppCard>
+          <SectionHeader title="Tendencia % grasa" subtitle="Estimación por medidas" />
+          {loading ? (
+            <ActivityIndicator color={theme.accent} />
+          ) : filteredBodyFatPoints.length === 0 ? (
+            <EmptyState title="Sin datos suficientes" subtitle="Registra cintura/cuello (y cadera si aplica)." />
+          ) : (
+            <View style={styles.weightChartWrap}>
+              {filteredBodyFatPoints.slice(-16).map((entry) => {
+                const min = bodyFatStats.min;
+                const max = bodyFatStats.max;
+                const ratio = max - min <= 0 ? 1 : (entry.value - min) / (max - min);
+                const height = 24 + ratio * 86;
+                return (
+                  <View key={entry.id} style={styles.weightBarCol}>
+                    <View style={[styles.bodyFatBar, { height }]} />
+                    <Text style={styles.weightBarLabel}>{new Date(entry.date).getDate()}</Text>
                   </View>
                 );
               })}
@@ -4552,10 +4681,10 @@ function MainAppTabs() {
     <SafeAreaView style={styles.screen}>
       <View style={styles.flex1}>
         {tab === "dashboard" ? (
-          <DashboardScreen onOpenBodyProgress={() => setTab("progress")} onOpenAdd={() => setTab("add")} />
+          <DashboardScreen onOpenBodyProgress={() => setTab("body")} onOpenAdd={() => setTab("add")} />
         ) : null}
         {tab === "add" ? <AddScreen /> : null}
-        {tab === "progress" ? <BodyProgressScreen /> : null}
+        {tab === "body" ? <BodyProgressScreen /> : null}
         {tab === "history" ? <HistoryScreen /> : null}
         {tab === "settings" ? <SettingsScreen /> : null}
       </View>
@@ -4564,7 +4693,7 @@ function MainAppTabs() {
         {([
           ["dashboard", "Dashboard"],
           ["add", "Añadir"],
-          ["progress", "Progress"],
+          ["body", "Body"],
           ["history", "History"],
           ["settings", "Settings"],
         ] as Array<[MainTab, string]>).map(([value, label]) => {
@@ -5178,9 +5307,30 @@ const styles = StyleSheet.create({
     backgroundColor: theme.accent,
     minHeight: 10,
   },
+  bodyFatBar: {
+    width: "90%",
+    borderRadius: 6,
+    backgroundColor: theme.fats,
+    minHeight: 10,
+  },
   weightBarLabel: {
     color: theme.muted,
     fontSize: 10,
+    fontWeight: "600",
+  },
+  bodyAvatarWrap: {
+    borderWidth: 1,
+    borderColor: theme.border,
+    borderRadius: 14,
+    backgroundColor: theme.panelSoft,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 8,
+    gap: 6,
+  },
+  bodyAvatarCaption: {
+    color: theme.muted,
+    fontSize: 12,
     fontWeight: "600",
   },
   rowWrap: {
