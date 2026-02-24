@@ -2586,6 +2586,7 @@ function BodyProgressScreen() {
   const [savingWeight, setSavingWeight] = useState(false);
   const [savingMeasure, setSavingMeasure] = useState(false);
   const [range, setRange] = useState<"7d" | "30d" | "90d">("30d");
+  const [showQuickWeightForm, setShowQuickWeightForm] = useState(true);
 
   const [summary, setSummary] = useState<BodySummary | null>(null);
   const [weightLogs, setWeightLogs] = useState<BodyWeightLog[]>([]);
@@ -2712,30 +2713,108 @@ function BodyProgressScreen() {
     }
   };
 
+  const bmiCategoryLabel = summary?.bmi_category ?? "unknown";
+  const bmiCategoryColor = (() => {
+    const normalized = bmiCategoryLabel.toLowerCase();
+    if (normalized.includes("under")) {
+      return "#8ba3c7";
+    }
+    if (normalized.includes("normal")) {
+      return "#7bb8ad";
+    }
+    if (normalized.includes("over")) {
+      return "#ccb086";
+    }
+    if (normalized.includes("obes")) {
+      return "#c89a9a";
+    }
+    return theme.muted;
+  })();
+
+  const recentWeights = useMemo(() => weightLogs.slice(0, 6), [weightLogs]);
+  const recentMeasurements = useMemo(() => measurementLogs.slice(0, 4), [measurementLogs]);
+
   return (
     <SafeAreaView style={styles.screen}>
       <ScrollView contentContainerStyle={styles.mainScroll}>
-        <SectionHeader title="Cuerpo" subtitle="Peso, IMC y composición" actionLabel="Recargar" onAction={() => void reload()} />
+        <View style={styles.bodyPageHeader}>
+          <View style={styles.bodyPageHeaderCopy}>
+            <Text style={styles.bodyPageTitle}>Body</Text>
+            <Text style={styles.bodyPageSubtitle}>Composición corporal, tendencia y métricas clave.</Text>
+          </View>
+          <Pressable
+            onPress={() => setShowQuickWeightForm((current) => !current)}
+            style={styles.bodyHeaderActionBtn}
+          >
+            <Text style={styles.bodyHeaderActionText}>Registrar peso</Text>
+          </Pressable>
+        </View>
+
+        {showQuickWeightForm ? (
+          <AppCard>
+            <SectionHeader title="Registro rápido de peso" subtitle="Añade hoy en un toque" />
+            <View style={styles.bodyQuickWeightRow}>
+              <View style={styles.bodyQuickWeightInputWrap}>
+                <InputField
+                  label="Peso (kg)"
+                  value={weightInput}
+                  onChangeText={setWeightInput}
+                  keyboardType="numeric"
+                />
+              </View>
+              <View style={styles.bodyQuickWeightInputWrap}>
+                <InputField label="Nota (opcional)" value={weightNote} onChangeText={setWeightNote} />
+              </View>
+            </View>
+            <View style={styles.bodyQuickWeightActions}>
+              <PrimaryButton title="Guardar peso" onPress={() => void saveWeight()} loading={savingWeight} />
+              <SecondaryButton title="Ocultar" onPress={() => setShowQuickWeightForm(false)} />
+            </View>
+          </AppCard>
+        ) : null}
 
         <AppCard>
-          <SectionHeader title="Resumen actual" subtitle="Visión de un vistazo" />
-          <View style={styles.bodyStatsRow}>
-            <StatPill label="Peso actual" value={summary?.latest_weight_kg ? `${summary.latest_weight_kg.toFixed(1)} kg` : "N/D"} tone="accent" />
-            <StatPill
-              label="Cambio semanal"
-              value={summary?.weekly_change_kg != null ? `${summary.weekly_change_kg > 0 ? "+" : ""}${summary.weekly_change_kg.toFixed(2)} kg` : "N/D"}
-              tone={summary?.weekly_change_kg && summary.weekly_change_kg > 0 ? "warning" : "default"}
+          <SectionHeader
+            title="Resumen actual"
+            subtitle="Peso, cambio semanal, IMC y % grasa"
+            actionLabel="Recargar"
+            onAction={() => void reload()}
+          />
+          <View style={styles.bodySummaryGrid}>
+            <MetricCard
+              label="Peso actual"
+              value={summary?.latest_weight_kg != null ? `${summary.latest_weight_kg.toFixed(1)} kg` : "N/D"}
+              subtitle="Último registro"
             />
-            <StatPill label="IMC" value={summary?.bmi ? summary.bmi.toFixed(1) : "N/D"} />
-            <StatPill label="% grasa" value={summary?.body_fat_percent ? `${summary.body_fat_percent.toFixed(1)}%` : "N/D"} />
+            <MetricCard
+              label="Cambio semanal"
+              value={
+                summary?.weekly_change_kg != null
+                  ? `${summary.weekly_change_kg > 0 ? "+" : ""}${summary.weekly_change_kg.toFixed(2)} kg`
+                  : "N/D"
+              }
+              subtitle="Vs semana previa"
+              color={summary?.weekly_change_kg != null && summary.weekly_change_kg > 0 ? theme.warning : theme.text}
+            />
+            <MetricCard
+              label="IMC"
+              value={summary?.bmi != null ? summary.bmi.toFixed(1) : "N/D"}
+              subtitle={bmiCategoryLabel}
+              color={bmiCategoryColor}
+            />
+            <MetricCard
+              label="% grasa"
+              value={summary?.body_fat_percent != null ? `${summary.body_fat_percent.toFixed(1)}%` : "N/D"}
+              subtitle={summary?.body_fat_category ?? "N/D"}
+            />
           </View>
           {summary?.needs_weight_checkin ? (
-            <Text style={styles.helperText}>Recomendación: registra peso al menos 1 vez por semana.</Text>
+            <Text style={styles.helperText}>Sugerencia: registra peso al menos una vez por semana.</Text>
           ) : null}
         </AppCard>
 
         <AppCard>
-          <SectionHeader title="Avatar corporal" subtitle="Visual rápido según IMC y % grasa" />
+          <SectionHeader title="Avatar corporal" subtitle="Vista técnica por grupos musculares" />
           <BodyAvatarSvg
             bmi={summary?.bmi ?? null}
             bmiCategory={summary?.bmi_category ?? "unknown"}
@@ -2743,10 +2822,23 @@ function BodyProgressScreen() {
             latestWeightKg={summary?.latest_weight_kg ?? null}
             weeklyChangeKg={summary?.weekly_change_kg ?? null}
           />
+          <View style={styles.bodyLegendRow}>
+            {[
+              ["Underweight", "#8ba3c7"],
+              ["Normal", "#7bb8ad"],
+              ["Overweight", "#ccb086"],
+              ["Obesity", "#c89a9a"],
+            ].map(([label, color]) => (
+              <View key={label} style={styles.bodyLegendItem}>
+                <View style={[styles.bodyLegendSwatch, { backgroundColor: color }]} />
+                <Text style={styles.bodyLegendLabel}>{label}</Text>
+              </View>
+            ))}
+          </View>
         </AppCard>
 
         <AppCard>
-          <SectionHeader title="Tendencia de peso" subtitle="7/30/90 días" />
+          <SectionHeader title="Tendencia de peso" subtitle="7 / 30 / 90 días" />
           <View style={styles.macroToggleRow}>
             {(["7d", "30d", "90d"] as const).map((option) => (
               <Pressable
@@ -2806,19 +2898,42 @@ function BodyProgressScreen() {
         </AppCard>
 
         <AppCard>
-          <SectionHeader title="Registrar peso" subtitle="Entrada rápida" />
-          <InputField label="Peso (kg)" value={weightInput} onChangeText={setWeightInput} keyboardType="numeric" />
-          <InputField label="Nota (opcional)" value={weightNote} onChangeText={setWeightNote} />
-          <PrimaryButton title="Guardar peso" onPress={() => void saveWeight()} loading={savingWeight} />
+          <SectionHeader title="Registros recientes" subtitle="Últimas entradas de peso y medidas" />
+          {recentWeights.length === 0 ? (
+            <EmptyState title="Sin peso registrado" subtitle="Usa 'Registrar peso' para empezar tu historial." />
+          ) : (
+            <>
+              {recentWeights.map((entry) => (
+                <View key={entry.id} style={styles.bodyRecordRow}>
+                  <View>
+                    <Text style={styles.bodyRecordTitle}>{entry.weight_kg.toFixed(1)} kg</Text>
+                    <Text style={styles.bodyRecordMeta}>{new Date(entry.created_at).toLocaleString()}</Text>
+                  </View>
+                  <Text style={styles.bodyRecordNote}>{entry.note?.trim() ? entry.note : "Sin nota"}</Text>
+                </View>
+              ))}
+            </>
+          )}
+          {recentMeasurements.length ? (
+            <View style={styles.bodyMeasurementSummary}>
+              <Text style={styles.bodyMeasurementSummaryTitle}>Últimas medidas</Text>
+              {recentMeasurements.map((entry) => (
+                <Text key={entry.id} style={styles.bodyMeasurementSummaryLine}>
+                  {new Date(entry.created_at).toLocaleDateString()} · Cintura {entry.waist_cm ?? "N/D"} · Cuello{" "}
+                  {entry.neck_cm ?? "N/D"} · Cadera {entry.hip_cm ?? "N/D"}
+                </Text>
+              ))}
+            </View>
+          ) : null}
         </AppCard>
 
         <AppCard>
-          <SectionHeader title="Registrar medidas" subtitle="Opcional para % grasa más preciso" />
+          <SectionHeader title="Registrar medidas" subtitle="Opcional para mejorar estimación de % grasa" />
           <InputField label="Cintura (cm)" value={waistInput} onChangeText={setWaistInput} keyboardType="numeric" />
           <InputField label="Cuello (cm)" value={neckInput} onChangeText={setNeckInput} keyboardType="numeric" />
           <InputField label="Cadera (cm)" value={hipInput} onChangeText={setHipInput} keyboardType="numeric" />
           <PrimaryButton title="Guardar medidas" onPress={() => void saveMeasurement()} loading={savingMeasure} />
-          <Text style={styles.helperText}>Registros de medidas: {measurementLogs.length}</Text>
+          <Text style={styles.helperText}>Registros de medidas acumulados: {measurementLogs.length}</Text>
         </AppCard>
 
         <AppCard>
@@ -5405,6 +5520,82 @@ const styles = StyleSheet.create({
   macroToggleTextActive: {
     color: theme.text,
   },
+  bodyPageHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  bodyPageHeaderCopy: {
+    flex: 1,
+    gap: 2,
+  },
+  bodyPageTitle: {
+    color: theme.text,
+    fontSize: 28,
+    fontWeight: "800",
+    letterSpacing: -0.3,
+  },
+  bodyPageSubtitle: {
+    color: theme.muted,
+    fontSize: 13,
+  },
+  bodyHeaderActionBtn: {
+    borderWidth: 1,
+    borderColor: theme.border,
+    borderRadius: 12,
+    backgroundColor: theme.panelSoft,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+  },
+  bodyHeaderActionText: {
+    color: theme.text,
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  bodyQuickWeightRow: {
+    flexDirection: "row",
+    gap: 8,
+    flexWrap: "wrap",
+  },
+  bodyQuickWeightInputWrap: {
+    flex: 1,
+    minWidth: 160,
+  },
+  bodyQuickWeightActions: {
+    gap: 8,
+  },
+  bodySummaryGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  bodyLegendRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  bodyLegendItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderWidth: 1,
+    borderColor: theme.border,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    backgroundColor: theme.panelSoft,
+  },
+  bodyLegendSwatch: {
+    width: 10,
+    height: 10,
+    borderRadius: 999,
+  },
+  bodyLegendLabel: {
+    color: theme.muted,
+    fontSize: 11,
+    fontWeight: "600",
+  },
   barsList: {
     gap: 8,
   },
@@ -5491,6 +5682,52 @@ const styles = StyleSheet.create({
     color: theme.muted,
     fontSize: 12,
     fontWeight: "600",
+  },
+  bodyRecordRow: {
+    borderWidth: 1,
+    borderColor: theme.border,
+    borderRadius: 12,
+    backgroundColor: theme.panelSoft,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 10,
+  },
+  bodyRecordTitle: {
+    color: theme.text,
+    fontWeight: "700",
+    fontSize: 14,
+  },
+  bodyRecordMeta: {
+    color: theme.muted,
+    fontSize: 11,
+    marginTop: 2,
+  },
+  bodyRecordNote: {
+    color: theme.muted,
+    fontSize: 12,
+    flexShrink: 1,
+    textAlign: "right",
+  },
+  bodyMeasurementSummary: {
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: theme.border,
+    borderRadius: 12,
+    backgroundColor: theme.panelSoft,
+    padding: 10,
+    gap: 4,
+  },
+  bodyMeasurementSummaryTitle: {
+    color: theme.text,
+    fontWeight: "700",
+    fontSize: 12,
+  },
+  bodyMeasurementSummaryLine: {
+    color: theme.muted,
+    fontSize: 11,
   },
   rowWrap: {
     flexDirection: "row",
