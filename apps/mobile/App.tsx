@@ -3414,12 +3414,13 @@ function HistoryScreen() {
                 <Pressable
                   key={isoDate}
                   onPress={() => setSelectedDay(isoDate)}
-                  style={[
+                  style={({ pressed }) => [
                     styles.historyCalendarCell,
                     hasIntakes && styles.historyCalendarCellFilled,
                     hasWeight && styles.historyCalendarCellHasWeight,
                     isToday && styles.historyCalendarCellToday,
                     active && styles.historyCalendarCellActive,
+                    pressed && styles.historyCalendarCellPressed,
                   ]}
                 >
                   <Text
@@ -7094,42 +7095,46 @@ const styles = StyleSheet.create({
   historyCalendarGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 7,
+    gap: 6,
     marginTop: 2,
   },
   historyCalendarCellEmpty: {
     width: "13.2%",
     aspectRatio: 1,
-    borderRadius: 13,
+    borderRadius: 12,
     opacity: 0.25,
   },
   historyCalendarCell: {
     width: "13.2%",
     aspectRatio: 1,
-    borderRadius: 13,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.04)",
-    backgroundColor: "#121212",
+    borderColor: "rgba(255,255,255,0.035)",
+    backgroundColor: "#101010",
     paddingHorizontal: 6,
     paddingVertical: 5,
     justifyContent: "space-between",
   },
+  historyCalendarCellPressed: {
+    opacity: 0.86,
+    transform: [{ scale: 0.98 }],
+  },
   historyCalendarCellFilled: {
-    borderColor: "rgba(255,255,255,0.08)",
-    backgroundColor: "#171717",
+    borderColor: "rgba(255,255,255,0.07)",
+    backgroundColor: "#141414",
   },
   historyCalendarCellHasWeight: {
-    backgroundColor: "#16181b",
+    backgroundColor: "#13171c",
   },
   historyCalendarCellToday: {
-    borderColor: "rgba(255,255,255,0.26)",
+    borderColor: "rgba(255,255,255,0.22)",
   },
   historyCalendarCellActive: {
-    borderColor: "rgba(255,255,255,0.95)",
-    backgroundColor: "#202020",
+    borderColor: "rgba(255,255,255,0.92)",
+    backgroundColor: "#1a1a1a",
     shadowColor: "#ffffff",
-    shadowOpacity: 0.12,
-    shadowRadius: 6,
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
     shadowOffset: { width: 0, height: 1 },
     elevation: 2,
   },
@@ -7150,18 +7155,18 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    minHeight: 11,
-    gap: 5,
+    minHeight: 10,
+    gap: 4,
   },
   historyCalendarFoodDot: {
-    width: 6,
-    height: 6,
+    width: 5,
+    height: 5,
     borderRadius: 999,
-    backgroundColor: "#f5f5f7",
+    backgroundColor: "#ededf0",
   },
   historyCalendarWeightDot: {
-    width: 7,
-    height: 7,
+    width: 6,
+    height: 6,
     borderRadius: 999,
     borderWidth: 1,
     borderColor: theme.kcal,
