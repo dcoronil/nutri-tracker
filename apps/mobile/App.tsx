@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import type { ReactElement } from "react";
+import type { ReactElement, ReactNode } from "react";
 import {
   ActivityIndicator,
   Animated,
@@ -1776,6 +1776,27 @@ function AppHeader({ title, subtitle }: { title: string; subtitle: string }) {
   );
 }
 
+function ScreenContainer(props: {
+  children: ReactNode;
+  scroll?: boolean;
+  contentContainerStyle?: object;
+  style?: object;
+}) {
+  if (props.scroll === false) {
+    return (
+      <SafeAreaView style={[styles.screen, props.style]}>
+        <View style={[styles.flex1, props.contentContainerStyle]}>{props.children}</View>
+      </SafeAreaView>
+    );
+  }
+
+  return (
+    <SafeAreaView style={[styles.screen, props.style]}>
+      <ScrollView contentContainerStyle={[styles.mainScroll, props.contentContainerStyle]}>{props.children}</ScrollView>
+    </SafeAreaView>
+  );
+}
+
 function InputField(props: {
   label: string;
   value: string;
@@ -1851,6 +1872,10 @@ function AppCard(props: { children: import("react").ReactNode; style?: object })
   return <View style={[styles.appCard, props.style]}>{props.children}</View>;
 }
 
+function HeroCard(props: { children: ReactNode; style?: object }) {
+  return <View style={[styles.appCard, styles.heroCardShell, props.style]}>{props.children}</View>;
+}
+
 function SectionHeader(props: {
   title: string;
   subtitle?: string;
@@ -1910,11 +1935,24 @@ function TagChip(props: { label: string; tone?: "default" | "accent" | "warning"
   );
 }
 
+function StatusBadge(props: { label: string; tone?: "default" | "accent" | "warning" | "danger" }) {
+  return <TagChip label={props.label} tone={props.tone} />;
+}
+
 function StatRow(props: { label: string; value: string }) {
   return (
     <View style={styles.statRow}>
       <Text style={styles.statRowLabel}>{props.label}</Text>
       <Text style={styles.statRowValue}>{props.value}</Text>
+    </View>
+  );
+}
+
+function InlineInfoRow(props: { label: string; value: string; valueColor?: string }) {
+  return (
+    <View style={styles.inlineInfoRow}>
+      <Text style={styles.inlineInfoLabel}>{props.label}</Text>
+      <Text style={[styles.inlineInfoValue, props.valueColor ? { color: props.valueColor } : null]}>{props.value}</Text>
     </View>
   );
 }
@@ -1966,6 +2004,33 @@ function MacroLegend({ segments }: { segments: Segment[] }) {
           </Text>
         </View>
       ))}
+    </View>
+  );
+}
+
+function SegmentedControl<T extends string>(props: {
+  value: T;
+  onChange: (value: T) => void;
+  options: Array<{ label: string; value: T }>;
+}) {
+  return (
+    <View style={styles.segmentedWrap}>
+      {props.options.map((option) => {
+        const active = option.value === props.value;
+        return (
+          <Pressable
+            key={option.value}
+            onPress={() => props.onChange(option.value)}
+            style={({ pressed }) => [
+              styles.segmentedItem,
+              active && styles.segmentedItemActive,
+              pressed && styles.segmentedItemPressed,
+            ]}
+          >
+            <Text style={[styles.segmentedText, active && styles.segmentedTextActive]}>{option.label}</Text>
+          </Pressable>
+        );
+      })}
     </View>
   );
 }
@@ -2888,8 +2953,8 @@ function DashboardScreen({
   };
 
   return (
-    <SafeAreaView style={styles.screen}>
-      <ScrollView contentContainerStyle={styles.mainScroll}>
+    <>
+      <ScreenContainer>
         <View style={styles.dashboardHeaderRow}>
           <View style={styles.dashboardHeaderLeft}>
             <Text style={styles.dashboardGreeting}>
@@ -2908,7 +2973,7 @@ function DashboardScreen({
           </Pressable>
         </View>
 
-        <AppCard style={[styles.heroCard, exceededKcal && styles.heroCardExceeded]}>
+        <HeroCard style={[styles.heroCard, exceededKcal && styles.heroCardExceeded]}>
           <SectionHeader title="Resumen del día" subtitle="Kcal restantes" />
           <Text style={styles.heroRemainingValue}>{kcalGoal > 0 ? kcalRemaining : "-"}</Text>
           <Text style={styles.heroRemainingSub}>
@@ -2923,13 +2988,13 @@ function DashboardScreen({
             />
           </View>
           <View style={styles.heroPillsRow}>
-            <TagChip label={exceededKcal ? "Sobre objetivo" : "En rango"} tone={exceededKcal ? "danger" : "accent"} />
-            <TagChip
+            <StatusBadge label={exceededKcal ? "Sobre objetivo" : "En rango"} tone={exceededKcal ? "danger" : "accent"} />
+            <StatusBadge
               label={`${summary?.intakes.length ?? 0} registro${(summary?.intakes.length ?? 0) === 1 ? "" : "s"}`}
               tone={summary?.intakes.length ? "default" : "warning"}
             />
           </View>
-        </AppCard>
+        </HeroCard>
 
         <AppCard>
           <SectionHeader title="Acciones principales" subtitle="Registra en menos toques" />
@@ -2982,20 +3047,14 @@ function DashboardScreen({
 
         <AppCard>
           <SectionHeader title="Macros del día" subtitle="Vista rápida" />
-          <View style={styles.macroToggleRow}>
-            <Pressable
-              style={[styles.macroToggleChip, macroViewMode === "rings" && styles.macroToggleChipActive]}
-              onPress={() => setMacroViewMode("rings")}
-            >
-              <Text style={[styles.macroToggleText, macroViewMode === "rings" && styles.macroToggleTextActive]}>Rings</Text>
-            </Pressable>
-            <Pressable
-              style={[styles.macroToggleChip, macroViewMode === "bars" && styles.macroToggleChipActive]}
-              onPress={() => setMacroViewMode("bars")}
-            >
-              <Text style={[styles.macroToggleText, macroViewMode === "bars" && styles.macroToggleTextActive]}>Barras</Text>
-            </Pressable>
-          </View>
+          <SegmentedControl
+            value={macroViewMode}
+            onChange={setMacroViewMode}
+            options={[
+              { label: "Rings", value: "rings" },
+              { label: "Barras", value: "bars" },
+            ]}
+          />
 
           {macroViewMode === "rings" ? (
             <View style={styles.rowWrap}>
@@ -3131,7 +3190,7 @@ function DashboardScreen({
             </View>
           ))}
         </AppCard>
-      </ScrollView>
+      </ScreenContainer>
       {accountMenuVisible ? (
         <View style={styles.accountMenuLayer} pointerEvents="box-none">
           <Pressable style={styles.accountMenuBackdrop} onPress={() => closeAccountMenu()}>
@@ -3148,9 +3207,9 @@ function DashboardScreen({
           >
             <Pressable style={styles.accountMenuCard} onPress={() => {}}>
               <Text style={styles.accountMenuTitle}>Mi cuenta</Text>
-              <StatRow label="Email" value={auth.user?.email ?? "-"} />
-              <StatRow label="Email verificado" value={auth.user?.email_verified ? "Sí" : "No"} />
-              <StatRow label="Onboarding" value={auth.user?.onboarding_completed ? "Completado" : "Pendiente"} />
+              <InlineInfoRow label="Email" value={auth.user?.email ?? "-"} />
+              <InlineInfoRow label="Email verificado" value={auth.user?.email_verified ? "Sí" : "No"} />
+              <InlineInfoRow label="Onboarding" value={auth.user?.onboarding_completed ? "Completado" : "Pendiente"} />
               <SecondaryButton
                 title="Cerrar sesión"
                 onPress={() =>
@@ -3163,7 +3222,7 @@ function DashboardScreen({
           </Animated.View>
         </View>
       ) : null}
-    </SafeAreaView>
+    </>
   );
 }
 
@@ -3433,17 +3492,15 @@ function BodyProgressScreen() {
 
         <AppCard>
           <SectionHeader title="Tendencia de peso" subtitle="7 / 30 / 90 días" />
-          <View style={styles.macroToggleRow}>
-            {(["7d", "30d", "90d"] as const).map((option) => (
-              <Pressable
-                key={option}
-                onPress={() => setRange(option)}
-                style={[styles.macroToggleChip, range === option && styles.macroToggleChipActive]}
-              >
-                <Text style={[styles.macroToggleText, range === option && styles.macroToggleTextActive]}>{option}</Text>
-              </Pressable>
-            ))}
-          </View>
+          <SegmentedControl
+            value={range}
+            onChange={setRange}
+            options={[
+              { label: "7d", value: "7d" },
+              { label: "30d", value: "30d" },
+              { label: "90d", value: "90d" },
+            ]}
+          />
 
           {loading ? (
             <ActivityIndicator color={theme.accent} />
@@ -6820,6 +6877,12 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 7 },
     elevation: 3,
   },
+  heroCardShell: {
+    borderRadius: 24,
+    padding: 20,
+    backgroundColor: "#0f1012",
+    borderColor: "#2b2d31",
+  },
   sectionHeaderWrap: {
     flexDirection: "row",
     alignItems: "center",
@@ -6903,6 +6966,23 @@ const styles = StyleSheet.create({
     color: theme.text,
     fontSize: 12,
     fontWeight: "700",
+  },
+  inlineInfoRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+    paddingVertical: 4,
+  },
+  inlineInfoLabel: {
+    color: theme.muted,
+    ...type.caption,
+  },
+  inlineInfoValue: {
+    color: theme.text,
+    fontSize: 14,
+    fontWeight: "800",
+    letterSpacing: 0.1,
   },
   statRow: {
     borderWidth: 1,
@@ -7225,6 +7305,36 @@ const styles = StyleSheet.create({
   macroToggleRow: {
     flexDirection: "row",
     gap: 8,
+  },
+  segmentedWrap: {
+    flexDirection: "row",
+    gap: 8,
+    backgroundColor: "#121316",
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#2a2d31",
+    padding: 4,
+  },
+  segmentedItem: {
+    flex: 1,
+    minHeight: 34,
+    borderRadius: 999,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 10,
+  },
+  segmentedItemPressed: {
+    opacity: 0.88,
+  },
+  segmentedItemActive: {
+    backgroundColor: "#252932",
+  },
+  segmentedText: {
+    color: theme.muted,
+    ...type.caption,
+  },
+  segmentedTextActive: {
+    color: theme.text,
   },
   macroToggleChip: {
     borderWidth: 1,
