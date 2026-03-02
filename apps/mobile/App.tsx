@@ -2244,7 +2244,7 @@ function AuthStack() {
         toValue: 1,
         duration: 210,
         easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
+        useNativeDriver: false,
       }).start(({ finished }) => {
         if (!finished) {
           return;
@@ -6430,7 +6430,7 @@ function MainAppTabs() {
         toValue: 1,
         duration: 210,
         easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
+        useNativeDriver: false,
       }).start(({ finished }) => {
         if (!finished) {
           return;
@@ -6655,7 +6655,7 @@ function RootNavigator() {
       toValue: 1,
       duration: 220,
       easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
+      useNativeDriver: false,
     }).start(({ finished }) => {
       if (!finished) {
         return;
