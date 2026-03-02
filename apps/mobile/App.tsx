@@ -6966,13 +6966,14 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   historyCalendarCard: {
-    gap: 12,
+    gap: 14,
   },
   historyCalendarTopRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     gap: 12,
+    marginBottom: 2,
   },
   historyCalendarTitleWrap: {
     flex: 1,
@@ -7000,13 +7001,15 @@ const styles = StyleSheet.create({
     color: "#d4d4d8",
     fontSize: 12,
     fontWeight: "700",
+    letterSpacing: 0.2,
   },
   historyCalendarMonthNav: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingTop: 2,
-    paddingBottom: 2,
+    paddingHorizontal: 2,
+    paddingTop: 4,
+    paddingBottom: 4,
   },
   historyCalendarArrowTouch: {
     width: 36,
@@ -7076,7 +7079,8 @@ const styles = StyleSheet.create({
   historyWeekDaysRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    paddingHorizontal: 4,
+    paddingHorizontal: 6,
+    marginTop: 2,
   },
   historyWeekDayLabel: {
     width: `${100 / 7}%`,
@@ -7088,15 +7092,16 @@ const styles = StyleSheet.create({
   },
   historyCalendarMonthLabel: {
     color: theme.text,
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: "700",
+    letterSpacing: -0.2,
     textTransform: "capitalize",
   },
   historyCalendarGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 6,
-    marginTop: 2,
+    marginTop: 4,
   },
   historyCalendarCellEmpty: {
     width: "13.2%",
@@ -7175,7 +7180,8 @@ const styles = StyleSheet.create({
   historyLegendRow: {
     flexDirection: "row",
     gap: 14,
-    marginTop: 6,
+    marginTop: 8,
+    marginBottom: 2,
   },
   historyLegendItem: {
     flexDirection: "row",
