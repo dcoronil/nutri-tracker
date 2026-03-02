@@ -2,17 +2,20 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 from datetime import UTC, date, datetime, time, timedelta
+from difflib import SequenceMatcher
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile, status
-from sqlalchemy import or_
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Request, UploadFile, status
+from sqlalchemy import and_, or_
 from sqlmodel import Session, desc, select
 
 from app.config import get_settings
 from app.database import get_session
 from app.models import (
     BodyMeasurementLog,
+    BodyProgressPhoto,
     BodyWeightLog,
     DailyGoal,
     EmailOTP,
@@ -21,14 +24,18 @@ from app.models import (
     NutritionBasis,
     Product,
     UserAccount,
+    UserFavoriteProduct,
     UserProductPreference,
     UserProfile,
+    WaterIntakeLog,
 )
 from app.schemas import (
     AuthResponse,
     AuthUser,
     BodyMeasurementLogCreate,
     BodyMeasurementLogRead,
+    BodyProgressPhotoCreate,
+    BodyProgressPhotoRead,
     BodySummaryResponse,
     BodyTrendPoint,
     BodyWeightLogCreate,
@@ -36,13 +43,17 @@ from app.schemas import (
     CalendarDayEntry,
     CalendarMonthResponse,
     CommunityFoodCreate,
+    CommunityFoodReportResponse,
     DailyGoalResponse,
     DailyGoalUpsert,
     DaySummary,
+    FavoriteProductRead,
+    FavoriteProductToggleResponse,
     FoodSearchItem,
     FoodSearchResponse,
     GoalFeedback,
     IntakeCreate,
+    IntakeDeleteResponse,
     IntakeRead,
     LabelPhotoResponse,
     LoginRequest,
@@ -60,6 +71,7 @@ from app.schemas import (
     ProfileRead,
     RegisterRequest,
     RegisterResponse,
+    RepeatIntakesResponse,
     ResendCodeRequest,
     UserAIKeyDeleteResponse,
     UserAIKeyStatusResponse,
@@ -67,6 +79,9 @@ from app.schemas import (
     UserAIKeyTestResponse,
     UserAIKeyUpsertRequest,
     VerifyRequest,
+    WaterLogCreate,
+    WaterLogRead,
+    WidgetTodaySummaryResponse,
 )
 from app.services.ai_keys import (
     AIKeyValidationError,
@@ -98,6 +113,7 @@ from app.services.body_metrics import (
     recommended_goals,
     rolling_weight_points,
     should_prompt_weight_log,
+    suggested_kcal_adjustment,
     weekly_weight_change,
 )
 from app.services.email import EmailSendError, send_verification_email
@@ -114,10 +130,15 @@ from app.services.nutrition import (
     sum_nutrients,
     zero_nutrients,
 )
-from app.services.openfoodfacts import OpenFoodFactsClientError, fetch_openfoodfacts_product
+from app.services.openfoodfacts import (
+    OpenFoodFactsClientError,
+    fetch_openfoodfacts_product,
+    search_openfoodfacts_products,
+)
 from app.services.openfoodfacts import (
     missing_critical_fields as off_missing_critical_fields,
 )
+from app.services.rate_limit import client_key_from_ip, rate_limiter
 from app.services.vision_ai import (
     VisionAIError,
     estimate_meal_with_ai,
@@ -136,6 +157,15 @@ def _to_utc(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=UTC)
     return value.astimezone(UTC)
+
+
+def _rate_limit(request: Request, *, scope: str, limit: int, window_seconds: int, key_suffix: str = "") -> None:
+    client_ip = request.headers.get("x-forwarded-for")
+    if not client_ip and request.client:
+        client_ip = request.client.host
+    client_key = client_key_from_ip(client_ip)
+    full_key = f"{client_key}:{key_suffix}" if key_suffix else client_key
+    rate_limiter.check(scope=scope, key=full_key, limit=limit, window_seconds=window_seconds)
 
 
 def _auth_user(user: UserAccount) -> AuthUser:
@@ -452,8 +482,10 @@ def health() -> dict[str, str]:
 @router.post("/auth/register", response_model=RegisterResponse)
 def register(
     payload: RegisterRequest,
+    request: Request,
     session: Annotated[Session, Depends(get_session)],
 ) -> RegisterResponse:
+    _rate_limit(request, scope="auth_register", limit=8, window_seconds=60)
     email = payload.email.strip().lower()
     if not validate_email_format(email):
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid email")
@@ -490,8 +522,10 @@ def register(
 @router.post("/auth/resend-code", response_model=RegisterResponse)
 def resend_code(
     payload: ResendCodeRequest,
+    request: Request,
     session: Annotated[Session, Depends(get_session)],
 ) -> RegisterResponse:
+    _rate_limit(request, scope="auth_resend", limit=8, window_seconds=60)
     email = payload.email.strip().lower()
     user = session.exec(select(UserAccount).where(UserAccount.email == email)).first()
     if not user:
@@ -515,8 +549,10 @@ def resend_code(
 @router.post("/auth/verify", response_model=AuthResponse)
 def verify_email(
     payload: VerifyRequest,
+    request: Request,
     session: Annotated[Session, Depends(get_session)],
 ) -> AuthResponse:
+    _rate_limit(request, scope="auth_verify", limit=20, window_seconds=60)
     email = payload.email.strip().lower()
     user = session.exec(select(UserAccount).where(UserAccount.email == email)).first()
     if not user:
@@ -563,8 +599,10 @@ def verify_email(
 @router.post("/auth/login", response_model=AuthResponse)
 def login(
     payload: LoginRequest,
+    request: Request,
     session: Annotated[Session, Depends(get_session)],
 ) -> AuthResponse:
+    _rate_limit(request, scope="auth_login", limit=12, window_seconds=60)
     email = payload.email.strip().lower()
     user = session.exec(select(UserAccount).where(UserAccount.email == email)).first()
     if not user or not verify_password(payload.password, user.password_hash):
@@ -599,9 +637,11 @@ def user_ai_key_status(
 @router.post("/user/ai-key", response_model=UserAIKeyStatusResponse)
 def upsert_user_ai_key(
     payload: UserAIKeyUpsertRequest,
+    request: Request,
     current_user: Annotated[UserAccount, Depends(get_verified_user)],
     session: Annotated[Session, Depends(get_session)],
 ) -> UserAIKeyStatusResponse:
+    _rate_limit(request, scope="ai_key_upsert", limit=15, window_seconds=60, key_suffix=str(current_user.id))
     try:
         provider = normalize_provider_or_default(payload.provider)
         validate_api_key_shape(provider, payload.api_key)
@@ -631,8 +671,10 @@ def delete_user_ai_key(
 @router.post("/user/ai-key/test", response_model=UserAIKeyTestResponse)
 async def test_user_ai_key(
     payload: UserAIKeyTestRequest,
+    request: Request,
     current_user: Annotated[UserAccount, Depends(get_verified_user)],
 ) -> UserAIKeyTestResponse:
+    _rate_limit(request, scope="ai_key_test", limit=20, window_seconds=60, key_suffix=str(current_user.id))
     provider = normalize_provider_or_default(payload.provider or current_user.ai_provider)
 
     if payload.api_key and payload.api_key.strip():
@@ -669,6 +711,7 @@ def upsert_profile(
             sex=payload.sex,
             activity_level=payload.activity_level,
             goal_type=payload.goal_type,
+            weekly_weight_goal_kg=payload.weekly_weight_goal_kg,
             waist_cm=payload.waist_cm,
             neck_cm=payload.neck_cm,
             hip_cm=payload.hip_cm,
@@ -685,6 +728,7 @@ def upsert_profile(
         profile.sex = payload.sex
         profile.activity_level = payload.activity_level
         profile.goal_type = payload.goal_type
+        profile.weekly_weight_goal_kg = payload.weekly_weight_goal_kg
         profile.waist_cm = payload.waist_cm
         profile.neck_cm = payload.neck_cm
         profile.hip_cm = payload.hip_cm
@@ -710,6 +754,14 @@ def me_analysis(
 ) -> ProfileAnalysisResponse:
     profile = _load_profile_or_404(session, current_user.id)
     recommended = recommended_goals(profile)
+    weight_logs = session.exec(
+        select(BodyWeightLog).where(BodyWeightLog.user_id == current_user.id).order_by(desc(BodyWeightLog.created_at))
+    ).all()
+    weekly_delta = weekly_weight_change(weight_logs)
+    kcal_adjustment = suggested_kcal_adjustment(
+        weekly_weight_delta=weekly_delta,
+        goal_type=profile.goal_type,
+    )
 
     target_day = day or datetime.now(UTC).date()
     goal = session.exec(
@@ -735,6 +787,8 @@ def me_analysis(
         profile=_profile_to_read(profile),
         recommended_goal=DailyGoalUpsert(**recommended),
         goal_feedback_today=feedback,
+        suggested_kcal_adjustment=kcal_adjustment,
+        weekly_weight_goal_kg=profile.weekly_weight_goal_kg,
     )
 
 
@@ -782,6 +836,24 @@ def _measurement_log_to_read(record: BodyMeasurementLog) -> BodyMeasurementLogRe
         chest_cm=record.chest_cm,
         arm_cm=record.arm_cm,
         thigh_cm=record.thigh_cm,
+        created_at=record.created_at,
+    )
+
+
+def _water_log_to_read(record: WaterIntakeLog) -> WaterLogRead:
+    return WaterLogRead(
+        id=record.id,
+        ml=record.ml,
+        created_at=record.created_at,
+    )
+
+
+def _body_photo_to_read(record: BodyProgressPhoto) -> BodyProgressPhotoRead:
+    return BodyProgressPhotoRead(
+        id=record.id,
+        image_url=record.image_url,
+        note=record.note,
+        is_private=record.is_private,
         created_at=record.created_at,
     )
 
@@ -882,6 +954,88 @@ def list_body_measurement_logs(
     return [_measurement_log_to_read(row) for row in rows]
 
 
+@router.post("/body/progress-photos", response_model=BodyProgressPhotoRead)
+def create_body_progress_photo(
+    payload: BodyProgressPhotoCreate,
+    request: Request,
+    current_user: Annotated[UserAccount, Depends(get_verified_user)],
+    session: Annotated[Session, Depends(get_session)],
+) -> BodyProgressPhotoRead:
+    _rate_limit(request, scope="body_photo_create", limit=10, window_seconds=60, key_suffix=str(current_user.id))
+    image_url = payload.image_url.strip()
+    if not image_url:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="image_url is required")
+
+    record = BodyProgressPhoto(
+        user_id=current_user.id,
+        image_url=image_url,
+        note=(payload.note or "").strip() or None,
+        is_private=payload.is_private,
+        created_at=payload.created_at or datetime.now(UTC),
+    )
+    session.add(record)
+    session.commit()
+    session.refresh(record)
+    return _body_photo_to_read(record)
+
+
+@router.get("/body/progress-photos", response_model=list[BodyProgressPhotoRead])
+def list_body_progress_photos(
+    current_user: Annotated[UserAccount, Depends(get_verified_user)],
+    session: Annotated[Session, Depends(get_session)],
+    limit: int = 120,
+) -> list[BodyProgressPhotoRead]:
+    bounded_limit = max(1, min(limit, 365))
+    rows = session.exec(
+        select(BodyProgressPhoto)
+        .where(BodyProgressPhoto.user_id == current_user.id)
+        .order_by(desc(BodyProgressPhoto.created_at))
+        .limit(bounded_limit)
+    ).all()
+    return [_body_photo_to_read(row) for row in rows]
+
+
+@router.post("/water/logs", response_model=WaterLogRead)
+def create_water_log(
+    payload: WaterLogCreate,
+    request: Request,
+    current_user: Annotated[UserAccount, Depends(get_ready_user)],
+    session: Annotated[Session, Depends(get_session)],
+) -> WaterLogRead:
+    _rate_limit(request, scope="water_create", limit=30, window_seconds=60, key_suffix=str(current_user.id))
+    record = WaterIntakeLog(
+        user_id=current_user.id,
+        ml=payload.ml,
+        created_at=payload.created_at or datetime.now(UTC),
+    )
+    session.add(record)
+    session.commit()
+    session.refresh(record)
+    return _water_log_to_read(record)
+
+
+@router.get("/water/logs", response_model=list[WaterLogRead])
+def list_water_logs(
+    current_user: Annotated[UserAccount, Depends(get_ready_user)],
+    session: Annotated[Session, Depends(get_session)],
+    day: date | None = None,
+    limit: int = 240,
+) -> list[WaterLogRead]:
+    bounded_limit = max(1, min(limit, 1000))
+    stmt = (
+        select(WaterIntakeLog)
+        .where(WaterIntakeLog.user_id == current_user.id)
+        .order_by(desc(WaterIntakeLog.created_at))
+    )
+    if day:
+        start_dt = datetime.combine(day, time.min).replace(tzinfo=UTC)
+        end_dt = datetime.combine(day + timedelta(days=1), time.min).replace(tzinfo=UTC)
+        stmt = stmt.where(WaterIntakeLog.created_at >= start_dt).where(WaterIntakeLog.created_at < end_dt)
+
+    rows = session.exec(stmt.limit(bounded_limit)).all()
+    return [_water_log_to_read(row) for row in rows]
+
+
 @router.get("/body/summary", response_model=BodySummaryResponse)
 def body_summary(
     current_user: Annotated[UserAccount, Depends(get_ready_user)],
@@ -950,6 +1104,8 @@ def body_summary(
         has_intakes_today=len(today_summary.intakes) > 0,
         weekly_weight_delta=weekly_change,
         latest_weight_kg=latest_weight.weight_kg if latest_weight else profile.weight_kg if profile else None,
+        goal_type=profile.goal_type if profile else None,
+        weekly_weight_goal_kg=profile.weekly_weight_goal_kg if profile else None,
     )
 
     return BodySummaryResponse(
@@ -1051,12 +1207,210 @@ def _product_badge(product: Product) -> Literal["Verificado", "Comunidad", "Impo
     return "Importado"
 
 
+def _as_float_or_zero(value: object) -> float:
+    if isinstance(value, (int, float)):
+        return float(value)
+    return 0.0
+
+
+def _as_float_or_none(value: object) -> float | None:
+    if isinstance(value, (int, float)):
+        return float(value)
+    return None
+
+
+def _normalize_search_text(value: str) -> str:
+    lowered = value.strip().lower()
+    folded = unicodedata.normalize("NFKD", lowered)
+    without_accents = "".join(char for char in folded if not unicodedata.combining(char))
+    compact = re.sub(r"[^a-z0-9]+", " ", without_accents)
+    return re.sub(r"\s+", " ", compact).strip()
+
+
+def _tokenize_search_text(value: str) -> list[str]:
+    normalized = _normalize_search_text(value)
+    if not normalized:
+        return []
+    return [token for token in normalized.split(" ") if token]
+
+
+def _similarity_bonus(query: str, target: str, *, weight: float) -> float:
+    if not query or not target:
+        return 0.0
+    ratio = SequenceMatcher(None, query, target).ratio()
+    if ratio >= 0.92:
+        return weight
+    if ratio >= 0.85:
+        return weight * 0.72
+    if ratio >= 0.76:
+        return weight * 0.44
+    if ratio >= 0.68:
+        return weight * 0.24
+    return 0.0
+
+
+def _minimum_text_score_for_query(query: str) -> float:
+    normalized = _normalize_search_text(query)
+    length = len(normalized)
+    if length <= 2:
+        return 14.0
+    if length <= 4:
+        return 24.0
+    if length <= 7:
+        return 34.0
+    return 44.0
+
+
+def _text_match_score(query: str, name: str, brand: str | None, barcode: str | None) -> float:
+    q = _normalize_search_text(query)
+    name_l = _normalize_search_text(name)
+    brand_l = _normalize_search_text(brand or "")
+    barcode_l = (barcode or "").strip()
+
+    if not q:
+        return 0.0
+
+    if barcode_l and q == barcode_l:
+        return 1200.0
+
+    score = 0.0
+    if name_l == q:
+        score += 700.0
+    elif name_l.startswith(q):
+        score += 450.0
+    elif q in name_l:
+        score += 260.0
+
+    if brand_l == q:
+        score += 320.0
+    elif brand_l.startswith(q):
+        score += 180.0
+    elif q in brand_l:
+        score += 90.0
+
+    score += _similarity_bonus(q, name_l, weight=220.0)
+    score += _similarity_bonus(q, brand_l, weight=140.0)
+
+    query_tokens = [token for token in q.split(" ") if len(token) >= 2]
+    name_tokens = [token for token in name_l.split(" ") if len(token) >= 2]
+    brand_tokens = [token for token in brand_l.split(" ") if len(token) >= 2]
+
+    if query_tokens:
+        combined = f"{name_l} {brand_l}".strip()
+        if combined and all(token in combined for token in query_tokens):
+            score += 80.0
+
+    for token in query_tokens:
+        if token in name_tokens:
+            score += 70.0
+            continue
+        if token in brand_tokens:
+            score += 52.0
+            continue
+
+        best_name_ratio = max(
+            (SequenceMatcher(None, token, candidate).ratio() for candidate in name_tokens),
+            default=0.0,
+        )
+        best_brand_ratio = max(
+            (SequenceMatcher(None, token, candidate).ratio() for candidate in brand_tokens),
+            default=0.0,
+        )
+        best_ratio = max(best_name_ratio, best_brand_ratio)
+        if best_ratio >= 0.9:
+            score += 52.0
+        elif best_ratio >= 0.82:
+            score += 34.0
+        elif best_ratio >= 0.74:
+            score += 20.0
+
+    return score
+
+
+def _source_priority_score(product: Product) -> float:
+    if product.is_verified:
+        return 240.0
+    if product.source in {"community_verified", "local_verified"}:
+        return 220.0
+    if product.source == "community":
+        return 130.0
+    if product.source == "openfoodfacts":
+        return 60.0
+    return 100.0
+
+
+def _local_search_score(
+    *,
+    query: str,
+    product: Product,
+    is_favorite: bool,
+    user_use_count: int,
+    global_use_count: int,
+    text_score: float | None = None,
+) -> float:
+    score = (
+        text_score
+        if text_score is not None
+        else _text_match_score(query, product.name, product.brand, product.barcode)
+    )
+    score += _source_priority_score(product)
+    if product.created_by_user_id is not None:
+        score += 18.0
+    if is_favorite:
+        score += 180.0
+    score += min(user_use_count, 30) * 14.0
+    score += min(global_use_count, 80) * 2.2
+    return score
+
+
+def _off_search_preview_product(item: dict[str, object], synthetic_id: int) -> ProductRead:
+    basis = item.get("nutrition_basis")
+    if not isinstance(basis, NutritionBasis):
+        basis = NutritionBasis.per_100g
+
+    barcode = str(item.get("barcode") or "").strip()
+    name = str(item.get("name") or "").strip() or "Producto OpenFoodFacts"
+    brand_raw = item.get("brand")
+    image_raw = item.get("image_url")
+
+    return ProductRead(
+        id=synthetic_id,
+        barcode=barcode or None,
+        created_by_user_id=None,
+        is_public=True,
+        report_count=0,
+        name=name,
+        brand=brand_raw if isinstance(brand_raw, str) else None,
+        image_url=image_raw if isinstance(image_raw, str) else None,
+        nutrition_basis=basis,
+        serving_size_g=_as_float_or_none(item.get("serving_size_g")),
+        net_weight_g=_as_float_or_none(item.get("net_weight_g")),
+        kcal=_as_float_or_zero(item.get("kcal")),
+        protein_g=_as_float_or_zero(item.get("protein_g")),
+        fat_g=_as_float_or_zero(item.get("fat_g")),
+        sat_fat_g=_as_float_or_none(item.get("sat_fat_g")),
+        carbs_g=_as_float_or_zero(item.get("carbs_g")),
+        sugars_g=_as_float_or_none(item.get("sugars_g")),
+        fiber_g=_as_float_or_none(item.get("fiber_g")),
+        salt_g=_as_float_or_none(item.get("salt_g")),
+        source="openfoodfacts",
+        is_verified=False,
+        verified_at=None,
+        status="approved",
+        is_hidden=False,
+        canonical_product_id=None,
+        data_confidence="openfoodfacts_search_preview",
+    )
+
+
 @router.post("/foods/community", response_model=ProductRead)
 def create_community_food(
     payload: CommunityFoodCreate,
+    request: Request,
     current_user: Annotated[UserAccount, Depends(get_ready_user)],
     session: Annotated[Session, Depends(get_session)],
 ) -> ProductRead:
+    _rate_limit(request, scope="community_create", limit=15, window_seconds=60, key_suffix=str(current_user.id))
     barcode = payload.barcode.strip() if payload.barcode else None
     if barcode and not EAN_PATTERN.match(barcode):
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid EAN/UPC")
@@ -1091,6 +1445,9 @@ def create_community_food(
         source="community",
         is_verified=False,
         verified_at=None,
+        status="approved",
+        is_hidden=False,
+        canonical_product_id=None,
         data_confidence="community_approved_auto",
     )
     session.add(product)
@@ -1115,71 +1472,217 @@ async def search_foods(
 
     bounded_limit = max(1, min(limit, 40))
     pattern = f"%{query}%"
+    query_tokens = _tokenize_search_text(query)
+    token_patterns = [f"%{token}%" for token in query_tokens[:4]]
 
-    rows = session.exec(
+    visibility = or_(
+        Product.created_by_user_id == current_user.id,
+        and_(Product.is_public.is_(True), Product.is_hidden.is_(False), Product.status == "approved"),
+    )
+
+    text_filters = [
+        Product.name.ilike(pattern),
+        Product.brand.ilike(pattern),
+        Product.barcode.ilike(pattern),
+    ]
+    for token_pattern in token_patterns:
+        text_filters.extend([Product.name.ilike(token_pattern), Product.brand.ilike(token_pattern)])
+
+    candidate_rows = session.exec(
         select(Product)
-        .where(or_(Product.is_public.is_(True), Product.created_by_user_id == current_user.id))
-        .where(
-            or_(
-                Product.name.ilike(pattern),
-                Product.brand.ilike(pattern),
-                Product.barcode.ilike(pattern),
-            )
-        )
+        .where(visibility)
+        .where(or_(*text_filters))
         .order_by(desc(Product.is_verified), desc(Product.created_at))
-        .limit(bounded_limit)
+        .limit(max(80, bounded_limit * 5))
     ).all()
 
-    should_try_openfoodfacts = (
-        EAN_PATTERN.match(query) is not None and all(product.barcode != query for product in rows)
+    # When strict LIKE search is sparse, add a wider local pool and rank in Python.
+    if len(candidate_rows) < max(24, bounded_limit * 2):
+        fallback_rows = session.exec(
+            select(Product)
+            .where(visibility)
+            .order_by(desc(Product.is_verified), desc(Product.created_at))
+            .limit(max(180, bounded_limit * 10))
+        ).all()
+        seen_candidate_ids = {product.id for product in candidate_rows if product.id is not None}
+        for fallback in fallback_rows:
+            if fallback.id is None:
+                continue
+            if fallback.id in seen_candidate_ids:
+                continue
+            candidate_rows.append(fallback)
+            seen_candidate_ids.add(fallback.id)
+
+    product_ids = [product.id for product in candidate_rows if product.id is not None]
+    favorite_ids: set[int] = set()
+    user_use_counts: dict[int, int] = {}
+    global_use_counts: dict[int, int] = {}
+
+    if product_ids:
+        favorite_rows = session.exec(
+            select(UserFavoriteProduct.product_id)
+            .where(UserFavoriteProduct.user_id == current_user.id)
+            .where(UserFavoriteProduct.product_id.in_(product_ids))
+        ).all()
+        favorite_ids = set(favorite_rows)
+
+        user_intakes = session.exec(
+            select(Intake.product_id)
+            .where(Intake.user_id == current_user.id)
+            .where(Intake.product_id.in_(product_ids))
+        ).all()
+        for product_id in user_intakes:
+            user_use_counts[product_id] = user_use_counts.get(product_id, 0) + 1
+
+        global_intakes = session.exec(select(Intake.product_id).where(Intake.product_id.in_(product_ids))).all()
+        for product_id in global_intakes:
+            global_use_counts[product_id] = global_use_counts.get(product_id, 0) + 1
+
+    minimum_text_score = _minimum_text_score_for_query(query)
+    scored_rows: list[tuple[float, float, Product]] = []
+    for product in candidate_rows:
+        text_score = _text_match_score(query, product.name, product.brand, product.barcode)
+        if text_score < minimum_text_score:
+            continue
+        score = _local_search_score(
+            query=query,
+            product=product,
+            is_favorite=(product.id or -1) in favorite_ids,
+            user_use_count=user_use_counts.get(product.id or -1, 0),
+            global_use_count=global_use_counts.get(product.id or -1, 0),
+            text_score=text_score,
+        )
+        scored_rows.append((score, text_score, product))
+
+    ranked_rows = [
+        row[2]
+        for row in sorted(
+            scored_rows,
+            key=lambda item: (item[0], item[1], item[2].created_at),
+            reverse=True,
+        )
+    ]
+
+    results: list[FoodSearchItem] = []
+    seen_product_ids: set[int] = set()
+    seen_barcodes: set[str] = set()
+
+    for product in ranked_rows:
+        if product.id is None or product.id in seen_product_ids:
+            continue
+        seen_product_ids.add(product.id)
+        if product.barcode:
+            seen_barcodes.add(product.barcode)
+        results.append(
+            FoodSearchItem(
+                product=ProductRead.model_validate(product),
+                badge=_product_badge(product),
+                origin="local",
+            )
+        )
+        if len(results) >= bounded_limit:
+            return FoodSearchResponse(query=query, results=results)
+
+    should_try_openfoodfacts_barcode = EAN_PATTERN.match(query) is not None and all(
+        product.barcode != query for product in ranked_rows
     )
-    if should_try_openfoodfacts:
+    if should_try_openfoodfacts_barcode and len(results) < bounded_limit:
         try:
             off_product = await fetch_openfoodfacts_product(query)
         except OpenFoodFactsClientError:
             off_product = None
 
         if off_product and not off_missing_critical_fields(off_product):
-            imported = Product(
-                barcode=query,
-                name="",
-                brand=None,
-                image_url=None,
-                nutrition_basis=NutritionBasis.per_100g,
-                serving_size_g=None,
-                net_weight_g=None,
-                kcal=0,
-                protein_g=0,
-                fat_g=0,
-                sat_fat_g=None,
-                carbs_g=0,
-                sugars_g=None,
-                fiber_g=None,
-                salt_g=None,
-                data_confidence="manual",
-            )
+            existing = session.exec(select(Product).where(Product.barcode == query)).first()
+            imported = existing
+            if imported is None:
+                imported = Product(
+                    barcode=query,
+                    name="",
+                    brand=None,
+                    image_url=None,
+                    nutrition_basis=NutritionBasis.per_100g,
+                    serving_size_g=None,
+                    net_weight_g=None,
+                    kcal=0,
+                    protein_g=0,
+                    fat_g=0,
+                    sat_fat_g=None,
+                    carbs_g=0,
+                    sugars_g=None,
+                    fiber_g=None,
+                    salt_g=None,
+                    data_confidence="manual",
+                )
             _apply_openfoodfacts_payload(imported, off_product)
             session.add(imported)
             session.commit()
             session.refresh(imported)
-            rows.insert(0, imported)
+            if imported.id is not None and imported.id not in seen_product_ids:
+                seen_product_ids.add(imported.id)
+                if imported.barcode:
+                    seen_barcodes.add(imported.barcode)
+                results.append(
+                    FoodSearchItem(
+                        product=ProductRead.model_validate(imported),
+                        badge=_product_badge(imported),
+                        origin="local",
+                    )
+                )
 
-    seen: set[int] = set()
-    results: list[FoodSearchItem] = []
-    for product in rows:
-        if product.id is None or product.id in seen:
-            continue
-        seen.add(product.id)
-        results.append(
-            FoodSearchItem(
-                product=ProductRead.model_validate(product),
-                badge=_product_badge(product),
+    should_try_openfoodfacts_text = EAN_PATTERN.match(query) is None and len(results) < max(5, bounded_limit // 2)
+    if should_try_openfoodfacts_text:
+        try:
+            off_candidates = await search_openfoodfacts_products(query, limit=bounded_limit * 2)
+        except OpenFoodFactsClientError:
+            off_candidates = []
+
+        synthetic_id = -1
+        for candidate in off_candidates:
+            barcode = str(candidate.get("barcode") or "").strip()
+            if not barcode or barcode in seen_barcodes:
+                continue
+            results.append(
+                FoodSearchItem(
+                    product=_off_search_preview_product(candidate, synthetic_id),
+                    badge="Importado",
+                    origin="openfoodfacts_remote",
+                )
             )
-        )
-        if len(results) >= bounded_limit:
-            break
+            synthetic_id -= 1
+            seen_barcodes.add(barcode)
+            if len(results) >= bounded_limit:
+                break
 
     return FoodSearchResponse(query=query, results=results)
+
+
+@router.post("/foods/{product_id}/report", response_model=CommunityFoodReportResponse)
+def report_community_food(
+    product_id: int,
+    request: Request,
+    current_user: Annotated[UserAccount, Depends(get_ready_user)],
+    session: Annotated[Session, Depends(get_session)],
+) -> CommunityFoodReportResponse:
+    _rate_limit(request, scope="community_report", limit=20, window_seconds=60, key_suffix=str(current_user.id))
+    product = session.get(Product, product_id)
+    if not product:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+
+    product.report_count = (product.report_count or 0) + 1
+    if product.report_count >= 5:
+        product.status = "flagged"
+        product.is_hidden = True
+
+    session.add(product)
+    session.commit()
+    session.refresh(product)
+    return CommunityFoodReportResponse(
+        product_id=product.id,
+        report_count=product.report_count,
+        status=product.status,
+        is_hidden=product.is_hidden,
+    )
 
 
 @router.get("/products/by_barcode/{ean}", response_model=ProductLookupResponse)
@@ -1193,6 +1696,8 @@ async def product_by_barcode(
 
     local = session.exec(select(Product).where(Product.barcode == ean)).first()
     if local:
+        if local.is_hidden and local.created_by_user_id != current_user.id:
+            return ProductLookupResponse(source="not_found", message="Product not found")
         # Avoid mixing label/manual nutrition with external images.
         # Only sync OpenFoodFacts products with OpenFoodFacts data.
         if local.source == "openfoodfacts" and not local.is_verified:
@@ -1572,10 +2077,12 @@ async def correct_product_by_barcode_from_label_photo(
 
 @router.post("/meal-photo-estimate/questions", response_model=MealEstimateQuestionsResponse)
 async def meal_photo_estimate_questions(
+    request: Request,
     current_user: Annotated[UserAccount, Depends(get_ready_user)],
     description: Annotated[str | None, Form()] = None,
     photos: Annotated[list[UploadFile] | None, File()] = None,
 ) -> MealEstimateQuestionsResponse:
+    _rate_limit(request, scope="meal_questions", limit=12, window_seconds=60, key_suffix=str(current_user.id))
     ai_credentials = _user_ai_provider_and_key(current_user, required=True)
     if not ai_credentials:
         raise HTTPException(
@@ -1607,6 +2114,7 @@ async def meal_photo_estimate_questions(
 
 @router.post("/meal-photo-estimate/calculate", response_model=MealPhotoEstimateResponse)
 async def meal_photo_estimate_calculate(
+    request: Request,
     current_user: Annotated[UserAccount, Depends(get_ready_user)],
     session: Annotated[Session, Depends(get_session)],
     description: Annotated[str | None, Form()] = None,
@@ -1618,7 +2126,9 @@ async def meal_photo_estimate_calculate(
     commit: Annotated[bool, Form()] = False,
     photos: Annotated[list[UploadFile] | None, File()] = None,
 ) -> MealPhotoEstimateResponse:
+    _rate_limit(request, scope="meal_calculate", limit=18, window_seconds=60, key_suffix=str(current_user.id))
     return await intake_from_meal_photo_estimate(
+        request=request,
         current_user=current_user,
         session=session,
         description=description,
@@ -1634,6 +2144,7 @@ async def meal_photo_estimate_calculate(
 
 @router.post("/intakes/from-meal-photo-estimate", response_model=MealPhotoEstimateResponse)
 async def intake_from_meal_photo_estimate(
+    request: Request,
     current_user: Annotated[UserAccount, Depends(get_ready_user)],
     session: Annotated[Session, Depends(get_session)],
     description: Annotated[str | None, Form()] = None,
@@ -1645,6 +2156,7 @@ async def intake_from_meal_photo_estimate(
     commit: Annotated[bool, Form()] = False,
     photos: Annotated[list[UploadFile] | None, File()] = None,
 ) -> MealPhotoEstimateResponse:
+    _rate_limit(request, scope="meal_commit", limit=25, window_seconds=60, key_suffix=str(current_user.id))
     ai_credentials = _user_ai_provider_and_key(current_user, required=True)
     if not ai_credentials:
         raise HTTPException(
@@ -1790,12 +2302,131 @@ async def intake_from_meal_photo_estimate(
     return MealPhotoEstimateResponse.model_validate(response_base)
 
 
+@router.get("/favorites/products", response_model=list[FavoriteProductRead])
+def list_favorite_products(
+    current_user: Annotated[UserAccount, Depends(get_ready_user)],
+    session: Annotated[Session, Depends(get_session)],
+    limit: int = 60,
+) -> list[FavoriteProductRead]:
+    bounded_limit = max(1, min(limit, 200))
+    rows = session.exec(
+        select(UserFavoriteProduct, Product)
+        .join(Product, Product.id == UserFavoriteProduct.product_id)
+        .where(UserFavoriteProduct.user_id == current_user.id)
+        .where(Product.is_hidden.is_(False))
+        .order_by(desc(UserFavoriteProduct.created_at))
+        .limit(bounded_limit)
+    ).all()
+    return [
+        FavoriteProductRead(product=ProductRead.model_validate(product), created_at=favorite.created_at)
+        for favorite, product in rows
+    ]
+
+
+@router.post("/favorites/products/{product_id}", response_model=FavoriteProductToggleResponse)
+def add_favorite_product(
+    product_id: int,
+    current_user: Annotated[UserAccount, Depends(get_ready_user)],
+    session: Annotated[Session, Depends(get_session)],
+) -> FavoriteProductToggleResponse:
+    product = session.get(Product, product_id)
+    if not product or product.is_hidden:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+
+    existing = session.exec(
+        select(UserFavoriteProduct)
+        .where(UserFavoriteProduct.user_id == current_user.id)
+        .where(UserFavoriteProduct.product_id == product_id)
+    ).first()
+    if not existing:
+        session.add(UserFavoriteProduct(user_id=current_user.id, product_id=product_id, created_at=datetime.now(UTC)))
+        session.commit()
+    return FavoriteProductToggleResponse(favorited=True, product_id=product_id)
+
+
+@router.delete("/favorites/products/{product_id}", response_model=FavoriteProductToggleResponse)
+def remove_favorite_product(
+    product_id: int,
+    current_user: Annotated[UserAccount, Depends(get_ready_user)],
+    session: Annotated[Session, Depends(get_session)],
+) -> FavoriteProductToggleResponse:
+    existing = session.exec(
+        select(UserFavoriteProduct)
+        .where(UserFavoriteProduct.user_id == current_user.id)
+        .where(UserFavoriteProduct.product_id == product_id)
+    ).first()
+    if existing:
+        session.delete(existing)
+        session.commit()
+    return FavoriteProductToggleResponse(favorited=False, product_id=product_id)
+
+
+@router.post("/intakes/repeat-from-day/{from_day}", response_model=RepeatIntakesResponse)
+def repeat_intakes_from_day(
+    from_day: date,
+    current_user: Annotated[UserAccount, Depends(get_ready_user)],
+    session: Annotated[Session, Depends(get_session)],
+    to_day: date | None = None,
+) -> RepeatIntakesResponse:
+    target_day = to_day or datetime.now(UTC).date()
+    if from_day == target_day:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="from_day and to_day must be different",
+        )
+
+    source_start = datetime.combine(from_day, time.min).replace(tzinfo=UTC)
+    source_end = datetime.combine(from_day + timedelta(days=1), time.min).replace(tzinfo=UTC)
+    target_start = datetime.combine(target_day, time.min).replace(tzinfo=UTC)
+
+    existing_target = session.exec(
+        select(Intake)
+        .where(Intake.user_id == current_user.id)
+        .where(Intake.created_at >= target_start)
+        .where(Intake.created_at < target_start + timedelta(days=1))
+    ).all()
+    if existing_target:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Target day already has intakes")
+
+    source_intakes = session.exec(
+        select(Intake)
+        .where(Intake.user_id == current_user.id)
+        .where(Intake.created_at >= source_start)
+        .where(Intake.created_at < source_end)
+        .order_by(Intake.created_at.asc())
+    ).all()
+
+    copied = 0
+    for index, source in enumerate(source_intakes):
+        session.add(
+            Intake(
+                user_id=current_user.id,
+                product_id=source.product_id,
+                quantity_g=source.quantity_g,
+                quantity_units=source.quantity_units,
+                percent_pack=source.percent_pack,
+                method=source.method,
+                estimated=source.estimated,
+                estimate_confidence=source.estimate_confidence,
+                user_description=source.user_description,
+                source_method="repeat_day",
+                created_at=target_start + timedelta(minutes=10 * index),
+            )
+        )
+        copied += 1
+
+    session.commit()
+    return RepeatIntakesResponse(copied=copied, from_day=from_day, to_day=target_day)
+
+
 @router.post("/intakes", response_model=IntakeRead)
 def create_intake(
     payload: IntakeCreate,
+    request: Request,
     current_user: Annotated[UserAccount, Depends(get_ready_user)],
     session: Annotated[Session, Depends(get_session)],
 ) -> IntakeRead:
+    _rate_limit(request, scope="intake_create", limit=60, window_seconds=60, key_suffix=str(current_user.id))
     product = session.get(Product, payload.product_id)
     if not product:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
@@ -1864,6 +2495,21 @@ def create_intake(
         source_method=intake.source_method,
         nutrients=nutrients,
     )
+
+
+@router.delete("/intakes/{intake_id}", response_model=IntakeDeleteResponse)
+def delete_intake(
+    intake_id: int,
+    current_user: Annotated[UserAccount, Depends(get_ready_user)],
+    session: Annotated[Session, Depends(get_session)],
+) -> IntakeDeleteResponse:
+    intake = session.get(Intake, intake_id)
+    if intake is None or intake.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Intake not found")
+
+    session.delete(intake)
+    session.commit()
+    return IntakeDeleteResponse(deleted=True, intake_id=intake_id)
 
 
 def _day_summary(
@@ -1938,7 +2584,22 @@ def _day_summary(
             consumed,
         )
 
-    return DaySummary(date=day, goal=goal_payload, consumed=consumed, remaining=remaining, intakes=rows)
+    water_rows = session.exec(
+        select(WaterIntakeLog.ml)
+        .where(WaterIntakeLog.user_id == current_user.id)
+        .where(WaterIntakeLog.created_at >= start_dt)
+        .where(WaterIntakeLog.created_at < end_dt)
+    ).all()
+    water_ml = int(sum(water_rows))
+
+    return DaySummary(
+        date=day,
+        goal=goal_payload,
+        consumed=consumed,
+        remaining=remaining,
+        intakes=rows,
+        water_ml=water_ml,
+    )
 
 
 @router.get("/days/{day}/summary", response_model=DaySummary)
@@ -1957,6 +2618,34 @@ def day_summary_legacy(
     session: Annotated[Session, Depends(get_session)],
 ) -> DaySummary:
     return _day_summary(day=day, current_user=current_user, session=session)
+
+
+@router.get("/widget/summary/today", response_model=WidgetTodaySummaryResponse)
+def widget_today_summary(
+    current_user: Annotated[UserAccount, Depends(get_ready_user)],
+    session: Annotated[Session, Depends(get_session)],
+) -> WidgetTodaySummaryResponse:
+    today = datetime.now(UTC).date()
+    summary = _day_summary(day=today, current_user=current_user, session=session)
+
+    latest_weight = session.exec(
+        select(BodyWeightLog)
+        .where(BodyWeightLog.user_id == current_user.id)
+        .order_by(desc(BodyWeightLog.created_at))
+    ).first()
+
+    protein_goal = summary.goal.protein_goal if summary.goal else 0.0
+    kcal_goal = summary.goal.kcal_goal if summary.goal else 0.0
+    kcal_remaining = max(kcal_goal - summary.consumed.kcal, 0.0)
+
+    return WidgetTodaySummaryResponse(
+        date=today,
+        kcal_remaining=round(kcal_remaining, 2),
+        protein_consumed_g=round(summary.consumed.protein_g, 2),
+        protein_goal_g=round(protein_goal, 2),
+        water_ml=summary.water_ml,
+        latest_weight_kg=latest_weight.weight_kg if latest_weight else None,
+    )
 
 
 @router.post("/goals/{day}", response_model=DailyGoalResponse)

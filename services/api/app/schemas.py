@@ -50,6 +50,7 @@ class ProfileInput(BaseModel):
     sex: Sex = Sex.other
     activity_level: ActivityLevel = ActivityLevel.moderate
     goal_type: GoalType = GoalType.maintain
+    weekly_weight_goal_kg: float | None = Field(default=None, gt=0, le=2)
 
     waist_cm: float | None = Field(default=None, gt=0)
     neck_cm: float | None = Field(default=None, gt=0)
@@ -114,6 +115,8 @@ class BodySummaryResponse(BaseModel):
     bmi_category: str = "unknown"
     body_fat_percent: float | None = None
     body_fat_category: str = "unknown"
+    goal_type: GoalType | None = None
+    weekly_weight_goal_kg: float | None = None
     needs_weight_checkin: bool
     trend_points: list[BodyTrendPoint] = Field(default_factory=list)
     hints: list[str] = Field(default_factory=list)
@@ -203,6 +206,9 @@ class ProductRead(BaseModel):
     source: str
     is_verified: bool
     verified_at: datetime | None
+    status: str
+    is_hidden: bool
+    canonical_product_id: int | None
     data_confidence: str
 
     model_config = {"from_attributes": True}
@@ -284,6 +290,7 @@ class CommunityFoodCreate(BaseModel):
 class FoodSearchItem(BaseModel):
     product: ProductRead
     badge: Literal["Verificado", "Comunidad", "Importado", "Estimado"]
+    origin: Literal["local", "openfoodfacts_remote"] = "local"
 
 
 class FoodSearchResponse(BaseModel):
@@ -337,18 +344,26 @@ class IntakeRead(BaseModel):
     nutrients: IntakeNutrients
 
 
+class IntakeDeleteResponse(BaseModel):
+    deleted: bool
+    intake_id: int
+
+
 class DaySummary(BaseModel):
     date: date
     goal: DailyGoalUpsert | None = None
     consumed: IntakeNutrients
     remaining: IntakeNutrients | None = None
     intakes: list[IntakeRead]
+    water_ml: int = 0
 
 
 class ProfileAnalysisResponse(BaseModel):
     profile: ProfileRead
     recommended_goal: DailyGoalUpsert
     goal_feedback_today: GoalFeedback | None = None
+    suggested_kcal_adjustment: float | None = None
+    weekly_weight_goal_kg: float | None = None
 
 
 class MealEstimateQuestion(BaseModel):
@@ -389,3 +404,61 @@ class CalendarDayEntry(BaseModel):
 class CalendarMonthResponse(BaseModel):
     month: str
     days: list[CalendarDayEntry]
+
+
+class WaterLogCreate(BaseModel):
+    ml: int = Field(gt=0, le=5000)
+    created_at: datetime | None = None
+
+
+class WaterLogRead(BaseModel):
+    id: int
+    ml: int
+    created_at: datetime
+
+
+class FavoriteProductRead(BaseModel):
+    product: ProductRead
+    created_at: datetime
+
+
+class FavoriteProductToggleResponse(BaseModel):
+    favorited: bool
+    product_id: int
+
+
+class RepeatIntakesResponse(BaseModel):
+    copied: int
+    from_day: date
+    to_day: date
+
+
+class WidgetTodaySummaryResponse(BaseModel):
+    date: date
+    kcal_remaining: float
+    protein_consumed_g: float
+    protein_goal_g: float
+    water_ml: int
+    latest_weight_kg: float | None = None
+
+
+class CommunityFoodReportResponse(BaseModel):
+    product_id: int
+    report_count: int
+    status: str
+    is_hidden: bool
+
+
+class BodyProgressPhotoCreate(BaseModel):
+    image_url: str = Field(min_length=4, max_length=1024)
+    note: str | None = Field(default=None, max_length=280)
+    is_private: bool = True
+    created_at: datetime | None = None
+
+
+class BodyProgressPhotoRead(BaseModel):
+    id: int
+    image_url: str
+    note: str | None = None
+    is_private: bool
+    created_at: datetime
