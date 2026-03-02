@@ -1,5 +1,4 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import type { ReactElement, ReactNode } from "react";
 import {
   ActivityIndicator,
   Animated,
@@ -545,70 +544,25 @@ const STREAK_FLAME_SVG_XML =
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 92.27 122.88"><g><path fill="#EC6F59" fill-rule="evenodd" clip-rule="evenodd" d="M18.61,54.89C15.7,28.8,30.94,10.45,59.52,0C42.02,22.71,74.44,47.31,76.23,70.89c4.19-7.15,6.57-16.69,7.04-29.45c21.43,33.62,3.66,88.57-43.5,80.67c-4.33-0.72-8.5-2.09-12.3-4.13C10.27,108.8,0,88.79,0,69.68C0,57.5,5.21,46.63,11.95,37.99C12.85,46.45,14.77,52.76,18.61,54.89L18.61,54.89z"/><path fill="#FAD15C" fill-rule="evenodd" clip-rule="evenodd" d="M33.87,92.58c-4.86-12.55-4.19-32.82,9.42-39.93c0.1,23.3,23.05,26.27,18.8,51.14c3.92-4.44,5.9-11.54,6.25-17.15c6.22,14.24,1.34,25.63-7.53,31.43c-26.97,17.64-50.19-18.12-34.75-37.72C26.53,84.73,31.89,91.49,33.87,92.58L33.87,92.58z"/></g></svg>';
 const theme = {
   bg: "#050505",
-  bgElevated: "#0b0b0c",
-  panel: "#101010",
-  panelSoft: "#171717",
-  panelMuted: "#1d1d1f",
-  border: "#262626",
-  text: "#F5F5F5",
-  muted: "#A1A1AA",
-  accent: "#F5F5F5",
-  accentSoft: "#222225",
-  danger: "#D17A7A",
-  warning: "#D4A24C",
-  ok: "#6EE7B7",
-  info: "#7AA2E3",
-  protein: "#60A5FA",
+  bgElevated: "#0c0c0c",
+  panel: "#121212",
+  panelSoft: "#181818",
+  panelMuted: "#1f1f1f",
+  border: "#2a2a2a",
+  text: "#f5f5f5",
+  muted: "#a3a3a3",
+  accent: "#ffffff",
+  accentSoft: "#262626",
+  danger: "#f48f8f",
+  warning: "#f1d08e",
+  ok: "#a9d8bb",
+  protein: "#4f8dfd",
   carbs: "#f59e0b",
-  fats: "#EC4899",
-  kcal: "#2DD4BF",
-  fiber: "#86EFAC",
-  water: "#7DD3FC",
-  bmiUnderweight: "#86A6CF",
-  bmiNormal: "#6EE7B7",
-  bmiOverweight: "#D4A24C",
-  bmiObesity: "#D17A7A",
-  blue: "#C3C8D1",
-  yellow: "#E2D3B0",
-  red: "#D9A2A2",
-};
-
-const type = {
-  display: {
-    fontSize: 46,
-    lineHeight: 50,
-    fontWeight: "800" as const,
-    letterSpacing: -0.7,
-  },
-  h1: {
-    fontSize: 32,
-    lineHeight: 36,
-    fontWeight: "800" as const,
-    letterSpacing: -0.4,
-  },
-  h2: {
-    fontSize: 22,
-    lineHeight: 27,
-    fontWeight: "800" as const,
-    letterSpacing: -0.2,
-  },
-  h3: {
-    fontSize: 18,
-    lineHeight: 22,
-    fontWeight: "700" as const,
-    letterSpacing: -0.1,
-  },
-  body: {
-    fontSize: 14,
-    lineHeight: 20,
-    fontWeight: "500" as const,
-  },
-  caption: {
-    fontSize: 12,
-    lineHeight: 16,
-    fontWeight: "600" as const,
-    letterSpacing: 0.2,
-  },
+  fats: "#f472b6",
+  kcal: "#2ed9c3",
+  blue: "#b8b8b8",
+  yellow: "#dcdcdc",
+  red: "#f48f8f",
 };
 
 const authContext = createContext<AuthContextValue | undefined>(undefined);
@@ -694,54 +648,8 @@ function parseApiError(error: unknown): string {
   if (message.includes("Invalid email")) {
     return "El email no tiene un formato válido.";
   }
-  if (message.includes("pending verification")) {
-    return "Ese email aún no está verificado. Completa primero la verificación del código.";
-  }
 
   return message;
-}
-
-function stringifyErrorDetail(detail: unknown): string | null {
-  if (detail === null || detail === undefined) {
-    return null;
-  }
-  if (typeof detail === "string") {
-    const trimmed = detail.trim();
-    return trimmed || null;
-  }
-  if (typeof detail === "number" || typeof detail === "boolean") {
-    return String(detail);
-  }
-  if (Array.isArray(detail)) {
-    const pieces = detail
-      .map((item) => stringifyErrorDetail(item))
-      .filter((item): item is string => Boolean(item));
-    if (pieces.length > 0) {
-      return pieces.join(" | ");
-    }
-    return null;
-  }
-  if (typeof detail === "object") {
-    const record = detail as Record<string, unknown>;
-    const fromMsg = stringifyErrorDetail(record.msg);
-    if (fromMsg) {
-      return fromMsg;
-    }
-    const fromMessage = stringifyErrorDetail(record.message);
-    if (fromMessage) {
-      return fromMessage;
-    }
-    const fromDetail = stringifyErrorDetail(record.detail);
-    if (fromDetail) {
-      return fromDetail;
-    }
-    try {
-      return JSON.stringify(detail);
-    } catch {
-      return "Error de servidor no legible.";
-    }
-  }
-  return null;
 }
 
 function formatDateLocal(day: Date): string {
@@ -786,55 +694,6 @@ function toPositiveNumberOrNull(input: string): number | null {
     return null;
   }
   return toOptionalNumber(trimmed);
-}
-
-function evaluatePasswordStrength(password: string): {
-  label: string;
-  color: string;
-  progress: number;
-  isStrongEnough: boolean;
-} {
-  if (!password) {
-    return {
-      label: "Empieza a escribir una contraseña",
-      color: theme.muted,
-      progress: 0,
-      isStrongEnough: false,
-    };
-  }
-
-  const hasLower = /[a-z]/.test(password);
-  const hasUpper = /[A-Z]/.test(password);
-  const hasNumber = /[0-9]/.test(password);
-  const hasSymbol = /[^A-Za-z0-9]/.test(password);
-  const categories = [hasLower, hasUpper, hasNumber, hasSymbol].filter(Boolean).length;
-  const longEnough = password.length >= 8;
-  const strongLength = password.length >= 12;
-
-  if (!longEnough || categories <= 1) {
-    return {
-      label: "Contraseña poco segura",
-      color: theme.danger,
-      progress: 34,
-      isStrongEnough: false,
-    };
-  }
-
-  if (!strongLength || categories <= 2) {
-    return {
-      label: "Contraseña débil",
-      color: theme.warning,
-      progress: 67,
-      isStrongEnough: true,
-    };
-  }
-
-  return {
-    label: "Contraseña segura",
-    color: theme.ok,
-    progress: 100,
-    isStrongEnough: true,
-  };
 }
 
 function bmiValue(weightKg: number | null, heightCm: number | null): number | null {
@@ -980,8 +839,10 @@ function AuthProvider({ children }: { children: import("react").ReactNode }) {
       }
 
       if (!response.ok) {
-        const rawDetail = typeof body === "object" && body !== null ? (body as { detail?: unknown; message?: unknown }).detail ?? (body as { message?: unknown }).message : body;
-        const detail = stringifyErrorDetail(rawDetail);
+        const detail =
+          typeof body === "object" && body !== null
+            ? ((body as { detail?: string }).detail ?? (body as { message?: string }).message)
+            : undefined;
         throw new Error(detail ?? `HTTP ${response.status}`);
       }
 
@@ -1776,27 +1637,6 @@ function AppHeader({ title, subtitle }: { title: string; subtitle: string }) {
   );
 }
 
-function ScreenContainer(props: {
-  children: ReactNode;
-  scroll?: boolean;
-  contentContainerStyle?: object;
-  style?: object;
-}) {
-  if (props.scroll === false) {
-    return (
-      <SafeAreaView style={[styles.screen, props.style]}>
-        <View style={[styles.flex1, props.contentContainerStyle]}>{props.children}</View>
-      </SafeAreaView>
-    );
-  }
-
-  return (
-    <SafeAreaView style={[styles.screen, props.style]}>
-      <ScrollView contentContainerStyle={[styles.mainScroll, props.contentContainerStyle]}>{props.children}</ScrollView>
-    </SafeAreaView>
-  );
-}
-
 function InputField(props: {
   label: string;
   value: string;
@@ -1826,15 +1666,7 @@ function InputField(props: {
 function PrimaryButton(props: { title: string; onPress: () => void; loading?: boolean; disabled?: boolean }) {
   const disabled = props.disabled || props.loading;
   return (
-    <Pressable
-      onPress={props.onPress}
-      disabled={disabled}
-      style={({ pressed }) => [
-        styles.primaryButton,
-        pressed && !disabled && styles.primaryButtonPressed,
-        disabled && styles.disabledButton,
-      ]}
-    >
+    <Pressable onPress={props.onPress} disabled={disabled} style={[styles.primaryButton, disabled && styles.disabledButton]}>
       {props.loading ? <ActivityIndicator color={theme.bg} /> : <Text style={styles.primaryButtonText}>{props.title}</Text>}
     </Pressable>
   );
@@ -1842,38 +1674,14 @@ function PrimaryButton(props: { title: string; onPress: () => void; loading?: bo
 
 function SecondaryButton(props: { title: string; onPress: () => void; disabled?: boolean }) {
   return (
-    <Pressable
-      onPress={props.onPress}
-      disabled={props.disabled}
-      style={({ pressed }) => [
-        styles.secondaryButton,
-        pressed && !props.disabled && styles.secondaryButtonPressed,
-        props.disabled && styles.disabledButton,
-      ]}
-    >
+    <Pressable onPress={props.onPress} disabled={props.disabled} style={[styles.secondaryButton, props.disabled && styles.disabledButton]}>
       <Text style={styles.secondaryButtonText}>{props.title}</Text>
-    </Pressable>
-  );
-}
-
-function GhostButton(props: { title: string; onPress: () => void; disabled?: boolean }) {
-  return (
-    <Pressable
-      onPress={props.onPress}
-      disabled={props.disabled}
-      style={({ pressed }) => [styles.ghostButton, pressed && !props.disabled && styles.ghostButtonPressed, props.disabled && styles.disabledButton]}
-    >
-      <Text style={styles.ghostButtonText}>{props.title}</Text>
     </Pressable>
   );
 }
 
 function AppCard(props: { children: import("react").ReactNode; style?: object }) {
   return <View style={[styles.appCard, props.style]}>{props.children}</View>;
-}
-
-function HeroCard(props: { children: ReactNode; style?: object }) {
-  return <View style={[styles.appCard, styles.heroCardShell, props.style]}>{props.children}</View>;
 }
 
 function SectionHeader(props: {
@@ -1889,10 +1697,7 @@ function SectionHeader(props: {
         {props.subtitle ? <Text style={styles.sectionHeaderSubtitle}>{props.subtitle}</Text> : null}
       </View>
       {props.actionLabel && props.onAction ? (
-        <Pressable
-          style={({ pressed }) => [styles.sectionHeaderAction, pressed && styles.sectionHeaderActionPressed]}
-          onPress={props.onAction}
-        >
+        <Pressable style={styles.sectionHeaderAction} onPress={props.onAction}>
           <Text style={styles.sectionHeaderActionText}>{props.actionLabel}</Text>
         </Pressable>
       ) : null}
@@ -1935,24 +1740,11 @@ function TagChip(props: { label: string; tone?: "default" | "accent" | "warning"
   );
 }
 
-function StatusBadge(props: { label: string; tone?: "default" | "accent" | "warning" | "danger" }) {
-  return <TagChip label={props.label} tone={props.tone} />;
-}
-
 function StatRow(props: { label: string; value: string }) {
   return (
     <View style={styles.statRow}>
       <Text style={styles.statRowLabel}>{props.label}</Text>
       <Text style={styles.statRowValue}>{props.value}</Text>
-    </View>
-  );
-}
-
-function InlineInfoRow(props: { label: string; value: string; valueColor?: string }) {
-  return (
-    <View style={styles.inlineInfoRow}>
-      <Text style={styles.inlineInfoLabel}>{props.label}</Text>
-      <Text style={[styles.inlineInfoValue, props.valueColor ? { color: props.valueColor } : null]}>{props.value}</Text>
     </View>
   );
 }
@@ -1965,13 +1757,12 @@ function AvatarCircle({ letter }: { letter: string }) {
   );
 }
 
-function EmptyState(props: { title: string; subtitle: string; actionLabel?: string; onAction?: () => void }) {
+function EmptyState(props: { title: string; subtitle: string }) {
   return (
-    <View style={styles.emptyStateCard}>
+    <AppCard style={styles.emptyStateCard}>
       <Text style={styles.emptyStateTitle}>{props.title}</Text>
       <Text style={styles.emptyStateSubtitle}>{props.subtitle}</Text>
-      {props.actionLabel && props.onAction ? <GhostButton title={props.actionLabel} onPress={props.onAction} /> : null}
-    </View>
+    </AppCard>
   );
 }
 
@@ -2004,33 +1795,6 @@ function MacroLegend({ segments }: { segments: Segment[] }) {
           </Text>
         </View>
       ))}
-    </View>
-  );
-}
-
-function SegmentedControl<T extends string>(props: {
-  value: T;
-  onChange: (value: T) => void;
-  options: Array<{ label: string; value: T }>;
-}) {
-  return (
-    <View style={styles.segmentedWrap}>
-      {props.options.map((option) => {
-        const active = option.value === props.value;
-        return (
-          <Pressable
-            key={option.value}
-            onPress={() => props.onChange(option.value)}
-            style={({ pressed }) => [
-              styles.segmentedItem,
-              active && styles.segmentedItemActive,
-              pressed && styles.segmentedItemPressed,
-            ]}
-          >
-            <Text style={[styles.segmentedText, active && styles.segmentedTextActive]}>{option.label}</Text>
-          </Pressable>
-        );
-      })}
     </View>
   );
 }
@@ -2075,7 +1839,7 @@ function AddActionCard(props: {
   onPress: () => void;
 }) {
   return (
-    <Pressable style={({ pressed }) => [styles.addActionCard, pressed && styles.addActionCardPressed]} onPress={props.onPress}>
+    <Pressable style={styles.addActionCard} onPress={props.onPress}>
       <Text style={styles.addActionTitle}>{props.title}</Text>
       <Text style={styles.addActionSubtitle}>{props.subtitle}</Text>
     </Pressable>
@@ -2107,33 +1871,14 @@ function SignupScreen({ onBack }: { onBack: () => void }) {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
-  const passwordStrength = useMemo(() => evaluatePasswordStrength(password), [password]);
-  const passwordStrengthAnim = useRef(new Animated.Value(0)).current;
-  const passwordStrengthWidth = useMemo(
-    () =>
-      passwordStrengthAnim.interpolate({
-        inputRange: [0, 1],
-        outputRange: ["0%", "100%"],
-      }),
-    [passwordStrengthAnim],
-  );
-
-  useEffect(() => {
-    Animated.timing(passwordStrengthAnim, {
-      toValue: passwordStrength.progress / 100,
-      duration: 240,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: false,
-    }).start();
-  }, [passwordStrength.progress, passwordStrengthAnim]);
 
   const submit = async () => {
     if (!email.trim() || !password.trim()) {
       Alert.alert("Faltan datos", "Completa email y contraseña.");
       return;
     }
-    if (!passwordStrength.isStrongEnough) {
-      Alert.alert("Contraseña", "La contraseña es poco segura. Usa una contraseña al menos débil o segura.");
+    if (password.length < 8) {
+      Alert.alert("Contraseña", "Debe tener al menos 8 caracteres.");
       return;
     }
     if (password !== confirmPassword) {
@@ -2160,25 +1905,9 @@ function SignupScreen({ onBack }: { onBack: () => void }) {
 
           <InputField label="Email" value={email} onChangeText={setEmail} keyboardType="email-address" />
           <InputField label="Contraseña" value={password} onChangeText={setPassword} secureTextEntry />
-          {password.length > 0 ? (
-            <View style={styles.passwordStrengthWrap}>
-              <View style={styles.passwordStrengthTrack}>
-                <Animated.View
-                  style={[
-                    styles.passwordStrengthFill,
-                    {
-                      width: passwordStrengthWidth,
-                      backgroundColor: passwordStrength.color,
-                    },
-                  ]}
-                />
-              </View>
-              <Text style={[styles.passwordStrengthText, { color: passwordStrength.color }]}>{passwordStrength.label}</Text>
-            </View>
-          ) : null}
           <InputField label="Confirmar contraseña" value={confirmPassword} onChangeText={setConfirmPassword} secureTextEntry />
 
-          <PrimaryButton title="Crear cuenta" onPress={submit} loading={loading} disabled={!passwordStrength.isStrongEnough} />
+          <PrimaryButton title="Crear cuenta" onPress={submit} loading={loading} />
           <SecondaryButton title="Volver" onPress={onBack} />
         </ScrollView>
       </KeyboardAvoidingView>
@@ -2227,66 +1956,16 @@ function LoginScreen({ onBack }: { onBack: () => void }) {
 
 function AuthStack() {
   const [screen, setScreen] = useState<AuthStackScreen>("welcome");
-  const [visibleScreen, setVisibleScreen] = useState<AuthStackScreen>("welcome");
-  const [incomingScreen, setIncomingScreen] = useState<AuthStackScreen | null>(null);
-  const authScreenTransition = useRef(new Animated.Value(1)).current;
 
-  const switchAuthScreen = useCallback(
-    (next: AuthStackScreen) => {
-      if (next === screen || next === incomingScreen) {
-        return;
-      }
-      setScreen(next);
-      setIncomingScreen(next);
-      authScreenTransition.stopAnimation();
-      authScreenTransition.setValue(0);
-      Animated.timing(authScreenTransition, {
-        toValue: 1,
-        duration: 210,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: false,
-      }).start(({ finished }) => {
-        if (!finished) {
-          return;
-        }
-        setVisibleScreen(next);
-        setIncomingScreen(null);
-        authScreenTransition.setValue(1);
-      });
-    },
-    [authScreenTransition, incomingScreen, screen],
-  );
+  if (screen === "signup") {
+    return <SignupScreen onBack={() => setScreen("welcome")} />;
+  }
 
-  const renderAuthScreen = useCallback(
-    (activeScreen: AuthStackScreen): ReactElement => {
-      if (activeScreen === "signup") {
-        return <SignupScreen onBack={() => switchAuthScreen("welcome")} />;
-      }
-      if (activeScreen === "login") {
-        return <LoginScreen onBack={() => switchAuthScreen("welcome")} />;
-      }
-      return <WelcomeScreen onCreate={() => switchAuthScreen("signup")} onLogin={() => switchAuthScreen("login")} />;
-    },
-    [switchAuthScreen],
-  );
+  if (screen === "login") {
+    return <LoginScreen onBack={() => setScreen("welcome")} />;
+  }
 
-  const outgoingOpacity = authScreenTransition.interpolate({
-    inputRange: [0, 1],
-    outputRange: [1, 0],
-  });
-
-  return (
-    <View style={styles.crossfadeHost}>
-      <Animated.View style={[styles.crossfadeLayer, incomingScreen ? { opacity: outgoingOpacity } : null]} pointerEvents={incomingScreen ? "none" : "auto"}>
-        {renderAuthScreen(visibleScreen)}
-      </Animated.View>
-      {incomingScreen ? (
-        <Animated.View style={[styles.crossfadeLayer, { opacity: authScreenTransition }]}>
-          {renderAuthScreen(incomingScreen)}
-        </Animated.View>
-      ) : null}
-    </View>
-  );
+  return <WelcomeScreen onCreate={() => setScreen("signup")} onLogin={() => setScreen("login")} />;
 }
 
 function VerifyEmailOnlyScreen() {
@@ -2393,7 +2072,7 @@ function ChoiceRow<T extends string>(props: {
             <Pressable
               key={option.value}
               onPress={() => props.onChange(option.value)}
-              style={({ pressed }) => [styles.chip, active && styles.chipActive, pressed && styles.chipPressed]}
+              style={[styles.chip, active && styles.chipActive]}
             >
               <Text style={[styles.chipText, active && styles.chipTextActive]}>{option.label}</Text>
             </Pressable>
@@ -2800,19 +2479,14 @@ function MacroDonut({ segments, title }: { segments: Segment[]; title: string })
 
 function DashboardScreen({
   onOpenBodyProgress,
-  onQuickAddAction,
 }: {
   onOpenBodyProgress: () => void;
-  onQuickAddAction: (action: QuickAddAction) => void;
 }) {
   const auth = useAuth();
   const selectedDate = useMemo(() => formatDateLocal(new Date()), []);
   const [macroViewMode, setMacroViewMode] = useState<"rings" | "bars">("rings");
   const [summary, setSummary] = useState<DaySummary | null>(null);
   const [loadingSummary, setLoadingSummary] = useState(true);
-  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
-  const [accountMenuVisible, setAccountMenuVisible] = useState(false);
-  const accountMenuAnim = useRef(new Animated.Value(0)).current;
 
   const loadSummary = useCallback(async () => {
     setLoadingSummary(true);
@@ -2829,53 +2503,6 @@ function DashboardScreen({
   useEffect(() => {
     void loadSummary();
   }, [loadSummary]);
-
-  const openAccountMenu = useCallback(() => {
-    if (accountMenuOpen) {
-      return;
-    }
-    setAccountMenuVisible(true);
-    setAccountMenuOpen(true);
-    accountMenuAnim.stopAnimation();
-    Animated.spring(accountMenuAnim, {
-      toValue: 1,
-      damping: 22,
-      stiffness: 240,
-      mass: 0.95,
-      useNativeDriver: true,
-    }).start();
-  }, [accountMenuAnim, accountMenuOpen]);
-
-  const closeAccountMenu = useCallback(
-    (onClosed?: () => void) => {
-      if (!accountMenuVisible) {
-        onClosed?.();
-        return;
-      }
-      setAccountMenuOpen(false);
-      accountMenuAnim.stopAnimation();
-      Animated.timing(accountMenuAnim, {
-        toValue: 0,
-        duration: 220,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
-      }).start(({ finished }) => {
-        if (finished) {
-          setAccountMenuVisible(false);
-        }
-        onClosed?.();
-      });
-    },
-    [accountMenuAnim, accountMenuVisible],
-  );
-
-  const toggleAccountMenu = useCallback(() => {
-    if (accountMenuOpen) {
-      closeAccountMenu();
-      return;
-    }
-    openAccountMenu();
-  }, [accountMenuOpen, closeAccountMenu, openAccountMenu]);
 
   const now = useMemo(() => new Date(), []);
   const hour = now.getHours();
@@ -2919,18 +2546,6 @@ function DashboardScreen({
     { label: "Carbs", value: summary?.consumed.carbs_g ?? 0, color: theme.carbs },
     { label: "Grasas", value: summary?.consumed.fat_g ?? 0, color: theme.fats },
   ];
-  const accountMenuTranslateY = accountMenuAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [-14, 0],
-  });
-  const accountMenuScale = accountMenuAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0.96, 1],
-  });
-  const accountMenuBackdropOpacity = accountMenuAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0, 1],
-  });
 
   const confirmDeleteIntake = (intakeId: number) => {
     Alert.alert("Eliminar consumo", "Este registro se borrará del día actual.", [
@@ -2953,8 +2568,8 @@ function DashboardScreen({
   };
 
   return (
-    <>
-      <ScreenContainer>
+    <SafeAreaView style={styles.screen}>
+      <ScrollView contentContainerStyle={styles.mainScroll}>
         <View style={styles.dashboardHeaderRow}>
           <View style={styles.dashboardHeaderLeft}>
             <Text style={styles.dashboardGreeting}>
@@ -2965,18 +2580,15 @@ function DashboardScreen({
           <Pressable style={styles.quickWeightBtn} onPress={onOpenBodyProgress}>
             <Text style={styles.quickWeightBtnText}>+</Text>
           </Pressable>
-          <Pressable
-            onPress={toggleAccountMenu}
-            style={({ pressed }) => [styles.avatarPressable, pressed && styles.avatarPressablePressed]}
-          >
-            <AvatarCircle letter={displayName.slice(0, 1)} />
-          </Pressable>
+          <AvatarCircle letter={displayName.slice(0, 1)} />
         </View>
 
-        <HeroCard style={[styles.heroCard, exceededKcal && styles.heroCardExceeded]}>
-          <SectionHeader title="Resumen del día" subtitle="Balance energético de hoy" />
+        <AppCard style={[styles.heroCard, exceededKcal && styles.heroCardExceeded]}>
+          <SectionHeader title="Resumen del día" subtitle="Kcal restantes" />
           <Text style={styles.heroRemainingValue}>{kcalGoal > 0 ? kcalRemaining : "-"}</Text>
-          <Text style={styles.heroRemainingSub}>kcal restantes</Text>
+          <Text style={styles.heroRemainingSub}>
+            {Math.round(kcalConsumed)} consumidas / {Math.round(kcalGoal)} objetivo
+          </Text>
           <View style={styles.heroProgressTrack}>
             <View
               style={[
@@ -2985,88 +2597,31 @@ function DashboardScreen({
               ]}
             />
           </View>
-          <View style={styles.heroMiniGrid}>
-            <View style={styles.heroMiniCard}>
-              <Text style={styles.heroMiniLabel}>Objetivo</Text>
-              <Text style={styles.heroMiniValue}>{Math.round(kcalGoal)}</Text>
-            </View>
-            <View style={styles.heroMiniCard}>
-              <Text style={styles.heroMiniLabel}>Consumidas</Text>
-              <Text style={styles.heroMiniValue}>{Math.round(kcalConsumed)}</Text>
-            </View>
-            <View style={styles.heroMiniCard}>
-              <Text style={styles.heroMiniLabel}>Restantes</Text>
-              <Text style={[styles.heroMiniValue, exceededKcal && { color: theme.danger }]}>{kcalGoal > 0 ? kcalRemaining : "-"}</Text>
-            </View>
-          </View>
           <View style={styles.heroPillsRow}>
-            <StatusBadge label={exceededKcal ? "Sobre objetivo" : "En rango"} tone={exceededKcal ? "danger" : "accent"} />
-            <StatusBadge
+            <TagChip label={exceededKcal ? "Sobre objetivo" : "En rango"} tone={exceededKcal ? "danger" : "accent"} />
+            <TagChip
               label={`${summary?.intakes.length ?? 0} registro${(summary?.intakes.length ?? 0) === 1 ? "" : "s"}`}
               tone={summary?.intakes.length ? "default" : "warning"}
             />
-          </View>
-        </HeroCard>
-
-        <AppCard>
-          <SectionHeader title="Acciones principales" subtitle="Registra en menos toques" />
-          <View style={styles.dashboardActionGrid}>
-            <Pressable
-              style={({ pressed }) => [styles.dashboardActionCard, pressed && styles.dashboardActionCardPressed]}
-              onPress={() => onQuickAddAction("barcode")}
-            >
-              <View style={[styles.dashboardActionIcon, { backgroundColor: "rgba(46,217,195,0.16)" }]}>
-                <QuickAddIcon action="barcode" />
-              </View>
-              <Text style={styles.dashboardActionTitle}>Escanear</Text>
-              <Text style={styles.dashboardActionSubtitle}>Código de barras</Text>
-            </Pressable>
-
-            <Pressable
-              style={({ pressed }) => [styles.dashboardActionCard, pressed && styles.dashboardActionCardPressed]}
-              onPress={() => onQuickAddAction("manual")}
-            >
-              <View style={[styles.dashboardActionIcon, { backgroundColor: "rgba(79,141,253,0.16)" }]}>
-                <QuickAddIcon action="manual" />
-              </View>
-              <Text style={styles.dashboardActionTitle}>Buscar</Text>
-              <Text style={styles.dashboardActionSubtitle}>Nombre o marca</Text>
-            </Pressable>
-
-            <Pressable
-              style={({ pressed }) => [styles.dashboardActionCard, pressed && styles.dashboardActionCardPressed]}
-              onPress={() => onQuickAddAction("meal_photo")}
-            >
-              <View style={[styles.dashboardActionIcon, { backgroundColor: "rgba(245,158,11,0.16)" }]}>
-                <QuickAddIcon action="meal_photo" />
-              </View>
-              <Text style={styles.dashboardActionTitle}>Foto comida</Text>
-              <Text style={styles.dashboardActionSubtitle}>Estimación IA</Text>
-            </Pressable>
-
-            <Pressable
-              style={({ pressed }) => [styles.dashboardActionCard, pressed && styles.dashboardActionCardPressed]}
-              onPress={onOpenBodyProgress}
-            >
-              <View style={[styles.dashboardActionIcon, { backgroundColor: "rgba(244,114,182,0.16)" }]}>
-                <Text style={styles.dashboardActionWeightIcon}>kg</Text>
-              </View>
-              <Text style={styles.dashboardActionTitle}>Peso</Text>
-              <Text style={styles.dashboardActionSubtitle}>Registrar ahora</Text>
-            </Pressable>
           </View>
         </AppCard>
 
         <AppCard>
           <SectionHeader title="Macros del día" subtitle="Vista rápida" />
-          <SegmentedControl
-            value={macroViewMode}
-            onChange={setMacroViewMode}
-            options={[
-              { label: "Rings", value: "rings" },
-              { label: "Barras", value: "bars" },
-            ]}
-          />
+          <View style={styles.macroToggleRow}>
+            <Pressable
+              style={[styles.macroToggleChip, macroViewMode === "rings" && styles.macroToggleChipActive]}
+              onPress={() => setMacroViewMode("rings")}
+            >
+              <Text style={[styles.macroToggleText, macroViewMode === "rings" && styles.macroToggleTextActive]}>Rings</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.macroToggleChip, macroViewMode === "bars" && styles.macroToggleChipActive]}
+              onPress={() => setMacroViewMode("bars")}
+            >
+              <Text style={[styles.macroToggleText, macroViewMode === "bars" && styles.macroToggleTextActive]}>Barras</Text>
+            </Pressable>
+          </View>
 
           {macroViewMode === "rings" ? (
             <View style={styles.rowWrap}>
@@ -3160,12 +2715,7 @@ function DashboardScreen({
           {loadingSummary ? <ActivityIndicator color={theme.accent} /> : null}
 
           {!loadingSummary && summary && summary.intakes.length === 0 ? (
-            <EmptyState
-              title="Todavía no has registrado comida hoy"
-              subtitle="Empieza con escaneo o búsqueda manual para activar tu progreso del día."
-              actionLabel="Escanear producto"
-              onAction={() => onQuickAddAction("barcode")}
-            />
+            <EmptyState title="Aún sin registros" subtitle="Escanea tu primer producto para empezar a construir tu día." />
           ) : null}
 
           {!loadingSummary && summary
@@ -3202,39 +2752,8 @@ function DashboardScreen({
             </View>
           ))}
         </AppCard>
-      </ScreenContainer>
-      {accountMenuVisible ? (
-        <View style={styles.accountMenuLayer} pointerEvents="box-none">
-          <Pressable style={styles.accountMenuBackdrop} onPress={() => closeAccountMenu()}>
-            <Animated.View style={[styles.accountMenuScrim, { opacity: accountMenuBackdropOpacity }]} />
-          </Pressable>
-          <Animated.View
-            style={[
-              styles.accountMenuContainer,
-              {
-                opacity: accountMenuAnim,
-                transform: [{ translateY: accountMenuTranslateY }, { scale: accountMenuScale }],
-              },
-            ]}
-          >
-            <Pressable style={styles.accountMenuCard} onPress={() => {}}>
-              <Text style={styles.accountMenuTitle}>Mi cuenta</Text>
-              <InlineInfoRow label="Email" value={auth.user?.email ?? "-"} />
-              <InlineInfoRow label="Email verificado" value={auth.user?.email_verified ? "Sí" : "No"} />
-              <InlineInfoRow label="Onboarding" value={auth.user?.onboarding_completed ? "Completado" : "Pendiente"} />
-              <SecondaryButton
-                title="Cerrar sesión"
-                onPress={() =>
-                  closeAccountMenu(() => {
-                    void auth.logout();
-                  })
-                }
-              />
-            </Pressable>
-          </Animated.View>
-        </View>
-      ) : null}
-    </>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
@@ -3244,9 +2763,7 @@ function BodyProgressScreen() {
   const [savingWeight, setSavingWeight] = useState(false);
   const [savingMeasure, setSavingMeasure] = useState(false);
   const [range, setRange] = useState<"7d" | "30d" | "90d">("30d");
-  const [showQuickWeightForm, setShowQuickWeightForm] = useState(false);
-  const [showMeasurementsForm, setShowMeasurementsForm] = useState(false);
-  const [showRecentLogs, setShowRecentLogs] = useState(true);
+  const [showQuickWeightForm, setShowQuickWeightForm] = useState(true);
 
   const [summary, setSummary] = useState<BodySummary | null>(null);
   const [weightLogs, setWeightLogs] = useState<BodyWeightLog[]>([]);
@@ -3377,16 +2894,16 @@ function BodyProgressScreen() {
   const bmiCategoryColor = (() => {
     const normalized = bmiCategoryLabel.toLowerCase();
     if (normalized.includes("under")) {
-      return theme.bmiUnderweight;
+      return "#8ba3c7";
     }
     if (normalized.includes("normal")) {
-      return theme.bmiNormal;
+      return "#7bb8ad";
     }
     if (normalized.includes("over")) {
-      return theme.bmiOverweight;
+      return "#ccb086";
     }
     if (normalized.includes("obes")) {
-      return theme.bmiObesity;
+      return "#c89a9a";
     }
     return theme.muted;
   })();
@@ -3395,7 +2912,8 @@ function BodyProgressScreen() {
   const recentMeasurements = useMemo(() => measurementLogs.slice(0, 4), [measurementLogs]);
 
   return (
-    <ScreenContainer>
+    <SafeAreaView style={styles.screen}>
+      <ScrollView contentContainerStyle={styles.mainScroll}>
         <View style={styles.bodyPageHeader}>
           <View style={styles.bodyPageHeaderCopy}>
             <Text style={styles.bodyPageTitle}>Body</Text>
@@ -3403,9 +2921,9 @@ function BodyProgressScreen() {
           </View>
           <Pressable
             onPress={() => setShowQuickWeightForm((current) => !current)}
-            style={({ pressed }) => [styles.bodyHeaderActionBtn, pressed && styles.bodyHeaderActionBtnPressed]}
+            style={styles.bodyHeaderActionBtn}
           >
-            <Text style={styles.bodyHeaderActionText}>{showQuickWeightForm ? "Ocultar" : "Registrar peso"}</Text>
+            <Text style={styles.bodyHeaderActionText}>Registrar peso</Text>
           </Pressable>
         </View>
 
@@ -3432,12 +2950,12 @@ function BodyProgressScreen() {
           </AppCard>
         ) : null}
 
-        <HeroCard style={styles.bodySummaryHero}>
+        <AppCard>
           <SectionHeader
             title="Resumen actual"
             subtitle="Peso, cambio semanal, IMC y % grasa"
-            actionLabel={showQuickWeightForm ? "Cerrar registro" : "Registrar peso"}
-            onAction={() => setShowQuickWeightForm((current) => !current)}
+            actionLabel="Recargar"
+            onAction={() => void reload()}
           />
           <View style={styles.bodySummaryGrid}>
             <MetricCard
@@ -3471,13 +2989,9 @@ function BodyProgressScreen() {
             <Text style={styles.helperText}>Sugerencia: registra peso al menos una vez por semana.</Text>
           ) : null}
           {summary?.weekly_weight_goal_kg != null ? (
-            <InlineInfoRow label="Objetivo semanal" value={`${summary.weekly_weight_goal_kg.toFixed(2)} kg`} valueColor={theme.kcal} />
+            <Text style={styles.helperText}>Objetivo semanal configurado: {summary.weekly_weight_goal_kg.toFixed(2)} kg.</Text>
           ) : null}
-          {summary?.needs_weight_checkin ? (
-            <InlineInfoRow label="Check-in recomendado" value="Registrar peso esta semana" valueColor={theme.warning} />
-          ) : null}
-          <GhostButton title="Recargar datos" onPress={() => void reload()} />
-        </HeroCard>
+        </AppCard>
 
         <AppCard>
           <SectionHeader title="Avatar corporal" subtitle="Silueta corporal por perfil" />
@@ -3491,10 +3005,10 @@ function BodyProgressScreen() {
           />
           <View style={styles.bodyLegendRow}>
             {[
-              ["Underweight", theme.bmiUnderweight],
-              ["Normal", theme.bmiNormal],
-              ["Overweight", theme.bmiOverweight],
-              ["Obesity", theme.bmiObesity],
+              ["Underweight", "#8ba3c7"],
+              ["Normal", "#7bb8ad"],
+              ["Overweight", "#ccb086"],
+              ["Obesity", "#c89a9a"],
             ].map(([label, color]) => (
               <View key={label} style={styles.bodyLegendItem}>
                 <View style={[styles.bodyLegendSwatch, { backgroundColor: color }]} />
@@ -3506,25 +3020,22 @@ function BodyProgressScreen() {
 
         <AppCard>
           <SectionHeader title="Tendencia de peso" subtitle="7 / 30 / 90 días" />
-          <SegmentedControl
-            value={range}
-            onChange={setRange}
-            options={[
-              { label: "7d", value: "7d" },
-              { label: "30d", value: "30d" },
-              { label: "90d", value: "90d" },
-            ]}
-          />
+          <View style={styles.macroToggleRow}>
+            {(["7d", "30d", "90d"] as const).map((option) => (
+              <Pressable
+                key={option}
+                onPress={() => setRange(option)}
+                style={[styles.macroToggleChip, range === option && styles.macroToggleChipActive]}
+              >
+                <Text style={[styles.macroToggleText, range === option && styles.macroToggleTextActive]}>{option}</Text>
+              </Pressable>
+            ))}
+          </View>
 
           {loading ? (
             <ActivityIndicator color={theme.accent} />
           ) : filteredWeightLogs.length === 0 ? (
-            <EmptyState
-              title="Sin registros de peso"
-              subtitle="Añade tu primer peso para desbloquear tendencia y cambio semanal."
-              actionLabel="Registrar peso ahora"
-              onAction={() => setShowQuickWeightForm(true)}
-            />
+            <EmptyState title="Sin registros de peso" subtitle="Añade tu primer peso para ver la tendencia." />
           ) : (
             <View style={styles.weightChartWrap}>
               {filteredWeightLogs.slice(-16).map((entry) => {
@@ -3548,12 +3059,7 @@ function BodyProgressScreen() {
           {loading ? (
             <ActivityIndicator color={theme.accent} />
           ) : filteredBodyFatPoints.length === 0 ? (
-            <EmptyState
-              title="Sin datos suficientes"
-              subtitle="Registra cintura y cuello (más cadera si aplica) para estimar % grasa."
-              actionLabel="Añadir medidas"
-              onAction={() => setShowMeasurementsForm(true)}
-            />
+            <EmptyState title="Sin datos suficientes" subtitle="Registra cintura/cuello (y cadera si aplica)." />
           ) : (
             <View style={styles.weightChartWrap}>
               {filteredBodyFatPoints.slice(-16).map((entry) => {
@@ -3573,69 +3079,42 @@ function BodyProgressScreen() {
         </AppCard>
 
         <AppCard>
-          <SectionHeader
-            title="Registros recientes"
-            subtitle="Últimas entradas de peso y medidas"
-            actionLabel={showRecentLogs ? "Ocultar" : "Mostrar"}
-            onAction={() => setShowRecentLogs((current) => !current)}
-          />
-          {showRecentLogs ? (
-            <>
-              {recentWeights.length === 0 ? (
-                <EmptyState
-                  title="Sin peso registrado"
-                  subtitle="Usa 'Registrar peso' para empezar tu historial."
-                  actionLabel="Registrar peso"
-                  onAction={() => setShowQuickWeightForm(true)}
-                />
-              ) : (
-                <>
-                  {recentWeights.map((entry) => (
-                    <View key={entry.id} style={styles.bodyRecordRow}>
-                      <View>
-                        <Text style={styles.bodyRecordTitle}>{entry.weight_kg.toFixed(1)} kg</Text>
-                        <Text style={styles.bodyRecordMeta}>{new Date(entry.created_at).toLocaleString()}</Text>
-                      </View>
-                      <Text style={styles.bodyRecordNote}>{entry.note?.trim() ? entry.note : "Sin nota"}</Text>
-                    </View>
-                  ))}
-                </>
-              )}
-              {recentMeasurements.length ? (
-                <View style={styles.bodyMeasurementSummary}>
-                  <Text style={styles.bodyMeasurementSummaryTitle}>Últimas medidas</Text>
-                  {recentMeasurements.map((entry) => (
-                    <Text key={entry.id} style={styles.bodyMeasurementSummaryLine}>
-                      {new Date(entry.created_at).toLocaleDateString()} · Cintura {entry.waist_cm ?? "N/D"} · Cuello{" "}
-                      {entry.neck_cm ?? "N/D"} · Cadera {entry.hip_cm ?? "N/D"}
-                    </Text>
-                  ))}
-                </View>
-              ) : null}
-            </>
+          <SectionHeader title="Registros recientes" subtitle="Últimas entradas de peso y medidas" />
+          {recentWeights.length === 0 ? (
+            <EmptyState title="Sin peso registrado" subtitle="Usa 'Registrar peso' para empezar tu historial." />
           ) : (
-            <Text style={styles.helperText}>Vista resumida activa. Pulsa "Mostrar" para ver el detalle.</Text>
+            <>
+              {recentWeights.map((entry) => (
+                <View key={entry.id} style={styles.bodyRecordRow}>
+                  <View>
+                    <Text style={styles.bodyRecordTitle}>{entry.weight_kg.toFixed(1)} kg</Text>
+                    <Text style={styles.bodyRecordMeta}>{new Date(entry.created_at).toLocaleString()}</Text>
+                  </View>
+                  <Text style={styles.bodyRecordNote}>{entry.note?.trim() ? entry.note : "Sin nota"}</Text>
+                </View>
+              ))}
+            </>
           )}
+          {recentMeasurements.length ? (
+            <View style={styles.bodyMeasurementSummary}>
+              <Text style={styles.bodyMeasurementSummaryTitle}>Últimas medidas</Text>
+              {recentMeasurements.map((entry) => (
+                <Text key={entry.id} style={styles.bodyMeasurementSummaryLine}>
+                  {new Date(entry.created_at).toLocaleDateString()} · Cintura {entry.waist_cm ?? "N/D"} · Cuello{" "}
+                  {entry.neck_cm ?? "N/D"} · Cadera {entry.hip_cm ?? "N/D"}
+                </Text>
+              ))}
+            </View>
+          ) : null}
         </AppCard>
 
         <AppCard>
-          <SectionHeader
-            title="Registrar medidas"
-            subtitle="Opcional para mejorar estimación de % grasa"
-            actionLabel={showMeasurementsForm ? "Ocultar" : "Abrir"}
-            onAction={() => setShowMeasurementsForm((current) => !current)}
-          />
-          {showMeasurementsForm ? (
-            <>
-              <InputField label="Cintura (cm)" value={waistInput} onChangeText={setWaistInput} keyboardType="numeric" />
-              <InputField label="Cuello (cm)" value={neckInput} onChangeText={setNeckInput} keyboardType="numeric" />
-              <InputField label="Cadera (cm)" value={hipInput} onChangeText={setHipInput} keyboardType="numeric" />
-              <PrimaryButton title="Guardar medidas" onPress={() => void saveMeasurement()} loading={savingMeasure} />
-              <Text style={styles.helperText}>Registros de medidas acumulados: {measurementLogs.length}</Text>
-            </>
-          ) : (
-            <Text style={styles.helperText}>Añade medidas cuando quieras mejorar la precisión del % grasa.</Text>
-          )}
+          <SectionHeader title="Registrar medidas" subtitle="Opcional para mejorar estimación de % grasa" />
+          <InputField label="Cintura (cm)" value={waistInput} onChangeText={setWaistInput} keyboardType="numeric" />
+          <InputField label="Cuello (cm)" value={neckInput} onChangeText={setNeckInput} keyboardType="numeric" />
+          <InputField label="Cadera (cm)" value={hipInput} onChangeText={setHipInput} keyboardType="numeric" />
+          <PrimaryButton title="Guardar medidas" onPress={() => void saveMeasurement()} loading={savingMeasure} />
+          <Text style={styles.helperText}>Registros de medidas acumulados: {measurementLogs.length}</Text>
         </AppCard>
 
         <AppCard>
@@ -3651,7 +3130,8 @@ function BodyProgressScreen() {
             ))
           )}
         </AppCard>
-      </ScreenContainer>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
@@ -3832,7 +3312,7 @@ function HistoryScreen() {
   return (
     <SafeAreaView style={styles.screen}>
       <ScrollView contentContainerStyle={styles.mainScroll}>
-        <AppHeader title="Historial" subtitle="Actividad mensual, racha y detalle diario" />
+        <AppHeader title="History" subtitle="Actividad, adherencia y tendencias" />
 
         <AppCard>
           <SectionHeader title="Métricas últimos 7 días" />
@@ -3851,7 +3331,7 @@ function HistoryScreen() {
           <View style={styles.historyCalendarTopRow}>
             <View style={styles.historyCalendarTitleWrap}>
               <Text style={styles.historyCalendarTitle}>Calendario</Text>
-              <Text style={styles.historyCalendarSubtitle}>Comidas y peso por día, en una vista mensual</Text>
+              <Text style={styles.historyCalendarSubtitle}>Historial mensual de comidas y peso</Text>
             </View>
             <Pressable onPress={() => void load()} style={({ pressed }) => [styles.historyCalendarReloadBtn, pressed && styles.historyCalendarReloadBtnPressed]}>
               <Text style={styles.historyCalendarReloadText}>Recargar</Text>
@@ -4367,26 +3847,23 @@ function SettingsScreen() {
   const activeHintsCount = bodyHints.length;
 
   return (
-    <ScreenContainer>
+    <SafeAreaView style={styles.screen}>
+      <ScrollView contentContainerStyle={styles.mainScroll}>
         <AppHeader title="Ajustes" subtitle="Objetivos, perfil corporal, IA y datos" />
 
-        <HeroCard style={styles.settingsHeroCard}>
+        <AppCard style={styles.settingsHeroCard}>
           <SectionHeader title="Estado rápido" subtitle="Configuración clave del perfil" />
           <View style={styles.settingsStatusRow}>
-            <StatusBadge label={hasGoalsConfigured ? "Objetivos listos" : "Faltan objetivos"} tone={hasGoalsConfigured ? "accent" : "warning"} />
-            <StatusBadge
-              label={hasProfileConfigured ? "Perfil completo" : "Perfil pendiente"}
-              tone={hasProfileConfigured ? "accent" : "warning"}
-            />
-            <StatusBadge label={aiKeyStatus?.configured ? "IA activa" : "IA sin clave"} tone={aiKeyStatus?.configured ? "accent" : "default"} />
+            <TagChip label={hasGoalsConfigured ? "Objetivos listos" : "Faltan objetivos"} tone={hasGoalsConfigured ? "accent" : "warning"} />
+            <TagChip label={hasProfileConfigured ? "Perfil completo" : "Perfil pendiente"} tone={hasProfileConfigured ? "accent" : "warning"} />
+            <TagChip label={aiKeyStatus?.configured ? "IA activa" : "IA sin clave"} tone={aiKeyStatus?.configured ? "accent" : "default"} />
           </View>
-          <InlineInfoRow label="Coach hints" value={`${activeHintsCount}`} valueColor={activeHintsCount ? theme.warning : theme.ok} />
-          <InlineInfoRow
+          <StatRow label="Coach hints" value={`${activeHintsCount}`} />
+          <StatRow
             label="Sugerencia kcal"
             value={suggestedKcalAdjustment !== null ? `${suggestedKcalAdjustment >= 0 ? "+" : ""}${suggestedKcalAdjustment.toFixed(0)} kcal` : "N/D"}
-            valueColor={suggestedKcalAdjustment !== null ? theme.kcal : undefined}
           />
-        </HeroCard>
+        </AppCard>
 
         <AppCard>
           <SectionHeader
@@ -4423,7 +3900,7 @@ function SettingsScreen() {
                 keyboardType="numeric"
               />
               <View style={styles.settingsInlineActions}>
-                <GhostButton title="Usar recomendación" onPress={useRecommendedGoals} />
+                <SecondaryButton title="Usar recomendación" onPress={useRecommendedGoals} />
                 <PrimaryButton title="Guardar objetivos" onPress={() => void saveGoals()} loading={savingGoals} />
               </View>
               {recommendedGoal ? (
@@ -4441,10 +3918,10 @@ function SettingsScreen() {
             </>
           ) : (
             <View style={styles.settingsCollapsedSummary}>
-              <InlineInfoRow label="Kcal" value={goalDraft.kcal_goal || "-"} />
-              <InlineInfoRow label="Proteína" value={goalDraft.protein_goal ? `${goalDraft.protein_goal} g` : "-"} />
-              <InlineInfoRow label="Grasas" value={goalDraft.fat_goal ? `${goalDraft.fat_goal} g` : "-"} />
-              <InlineInfoRow label="Carbs" value={goalDraft.carbs_goal ? `${goalDraft.carbs_goal} g` : "-"} />
+              <StatRow label="Kcal" value={goalDraft.kcal_goal || "-"} />
+              <StatRow label="Proteína" value={goalDraft.protein_goal ? `${goalDraft.protein_goal} g` : "-"} />
+              <StatRow label="Grasas" value={goalDraft.fat_goal ? `${goalDraft.fat_goal} g` : "-"} />
+              <StatRow label="Carbs" value={goalDraft.carbs_goal ? `${goalDraft.carbs_goal} g` : "-"} />
             </View>
           )}
         </AppCard>
@@ -4537,9 +4014,9 @@ function SettingsScreen() {
             </>
           ) : (
             <View style={styles.settingsCollapsedSummary}>
-              <InlineInfoRow label="Peso" value={profileDraft.weight_kg ? `${profileDraft.weight_kg} kg` : "-"} />
-              <InlineInfoRow label="Altura" value={profileDraft.height_cm ? `${profileDraft.height_cm} cm` : "-"} />
-              <InlineInfoRow label="Sexo" value={profileDraft.sex} />
+              <StatRow label="Peso" value={profileDraft.weight_kg ? `${profileDraft.weight_kg} kg` : "-"} />
+              <StatRow label="Altura" value={profileDraft.height_cm ? `${profileDraft.height_cm} cm` : "-"} />
+              <StatRow label="Sexo" value={profileDraft.sex} />
             </View>
           )}
         </AppCard>
@@ -4581,9 +4058,9 @@ function SettingsScreen() {
             </>
           ) : (
             <View style={styles.settingsCollapsedSummary}>
-              <InlineInfoRow label="Proveedor" value="OpenAI" />
-              <InlineInfoRow label="Estado" value={aiKeyStatus?.configured ? "Clave configurada" : "Sin clave configurada"} />
-              {aiKeyStatus?.key_hint ? <InlineInfoRow label="Hint" value={aiKeyStatus.key_hint} /> : null}
+              <StatRow label="Proveedor" value="OpenAI" />
+              <StatRow label="Estado" value={aiKeyStatus?.configured ? "Clave configurada" : "Sin clave configurada"} />
+              {aiKeyStatus?.key_hint ? <StatRow label="Hint" value={aiKeyStatus.key_hint} /> : null}
             </View>
           )}
         </AppCard>
@@ -4656,13 +4133,14 @@ function SettingsScreen() {
             </>
           ) : (
             <View style={styles.settingsCollapsedSummary}>
-              <InlineInfoRow label="Export JSON" value="Disponible" />
-              <InlineInfoRow label="Export CSV" value="Disponible" />
-              <InlineInfoRow label="Resumen semanal" value="Compartible" />
+              <StatRow label="Export JSON" value="Disponible" />
+              <StatRow label="Export CSV" value="Disponible" />
+              <StatRow label="Resumen semanal" value="Compartible" />
             </View>
           )}
         </AppCard>
-    </ScreenContainer>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
@@ -6340,7 +5818,7 @@ function QuickAddIcon(props: { action: QuickAddAction }) {
 
 function QuickAddCard(props: { action: QuickAddAction; title: string; subtitle: string; onPress: () => void; accent: string }) {
   return (
-    <Pressable style={({ pressed }) => [styles.quickAddCard, pressed && styles.quickAddCardPressed]} onPress={props.onPress}>
+    <Pressable style={styles.quickAddCard} onPress={props.onPress}>
       <View style={[styles.quickAddIconWrap, { backgroundColor: props.accent }]}>
         <QuickAddIcon action={props.action} />
       </View>
@@ -6352,13 +5830,10 @@ function QuickAddCard(props: { action: QuickAddAction; title: string; subtitle: 
 
 function MainAppTabs() {
   const [tab, setTab] = useState<MainTab>("dashboard");
-  const [visibleTab, setVisibleTab] = useState<MainTab>("dashboard");
-  const [incomingTab, setIncomingTab] = useState<MainTab | null>(null);
   const [quickAddOpen, setQuickAddOpen] = useState(false);
   const [quickAddVisible, setQuickAddVisible] = useState(false);
   const [launchAction, setLaunchAction] = useState<AddLaunchAction | null>(null);
   const quickAddAnim = useRef(new Animated.Value(0)).current;
-  const tabTransition = useRef(new Animated.Value(1)).current;
 
   const tabs: Array<{ value: MainTab; label: string; center?: boolean }> = [
     { value: "dashboard", label: "Panel" },
@@ -6409,52 +5884,13 @@ function MainAppTabs() {
 
   const runQuickAction = (action: QuickAddAction) => {
     closeQuickAdd(() => {
+      setTab("add");
       setLaunchAction({
         requestId: Date.now(),
         action,
       });
-      switchTab("add");
     });
   };
-
-  const switchTab = useCallback(
-    (nextTab: MainTab) => {
-      if ((nextTab === tab && !incomingTab) || nextTab === incomingTab) {
-        return;
-      }
-      setTab(nextTab);
-      setIncomingTab(nextTab);
-      tabTransition.stopAnimation();
-      tabTransition.setValue(0);
-      Animated.timing(tabTransition, {
-        toValue: 1,
-        duration: 210,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: false,
-      }).start(({ finished }) => {
-        if (!finished) {
-          return;
-        }
-        setVisibleTab(nextTab);
-        setIncomingTab(null);
-        tabTransition.setValue(1);
-      });
-    },
-    [incomingTab, tab, tabTransition],
-  );
-
-  const launchActionFromPanel = useCallback(
-    (action: QuickAddAction) => {
-      closeQuickAdd(() => {
-        setLaunchAction({
-          requestId: Date.now(),
-          action,
-        });
-        switchTab("add");
-      });
-    },
-    [closeQuickAdd, switchTab],
-  );
 
   const toggleQuickAdd = useCallback(() => {
     if (quickAddOpen) {
@@ -6481,13 +5917,13 @@ function MainAppTabs() {
     outputRange: ["0deg", "45deg"],
   });
 
-  const renderTabScene = useCallback(
-    (activeTab: MainTab): ReactElement | null => {
-      if (activeTab === "dashboard") {
-        return <DashboardScreen onOpenBodyProgress={() => switchTab("body")} onQuickAddAction={launchActionFromPanel} />;
-      }
-      if (activeTab === "add") {
-        return (
+  return (
+    <SafeAreaView style={styles.screen}>
+      <View style={styles.flex1}>
+        {tab === "dashboard" ? (
+          <DashboardScreen onOpenBodyProgress={() => setTab("body")} />
+        ) : null}
+        {tab === "add" ? (
           <AddScreen
             launchAction={launchAction}
             onLaunchActionHandled={(requestId) => {
@@ -6499,36 +5935,10 @@ function MainAppTabs() {
               });
             }}
           />
-        );
-      }
-      if (activeTab === "body") {
-        return <BodyProgressScreen />;
-      }
-      if (activeTab === "history") {
-        return <HistoryScreen />;
-      }
-      if (activeTab === "settings") {
-        return <SettingsScreen />;
-      }
-      return null;
-    },
-    [launchAction, launchActionFromPanel, switchTab],
-  );
-
-  const outgoingOpacity = tabTransition.interpolate({
-    inputRange: [0, 1],
-    outputRange: [1, 0],
-  });
-
-  return (
-    <SafeAreaView style={styles.screen}>
-      <View style={styles.crossfadeHost}>
-        <Animated.View style={[styles.crossfadeLayer, incomingTab ? { opacity: outgoingOpacity } : null]} pointerEvents={incomingTab ? "none" : "auto"}>
-          {renderTabScene(visibleTab)}
-        </Animated.View>
-        {incomingTab ? (
-          <Animated.View style={[styles.crossfadeLayer, { opacity: tabTransition }]}>{renderTabScene(incomingTab)}</Animated.View>
         ) : null}
+        {tab === "body" ? <BodyProgressScreen /> : null}
+        {tab === "history" ? <HistoryScreen /> : null}
+        {tab === "settings" ? <SettingsScreen /> : null}
       </View>
 
       <View style={styles.tabBar}>
@@ -6543,14 +5953,9 @@ function MainAppTabs() {
                   toggleQuickAdd();
                   return;
                 }
-                closeQuickAdd(() => switchTab(value));
+                closeQuickAdd(() => setTab(value));
               }}
-              style={({ pressed }) => [
-                styles.tabItem,
-                isCenter && styles.tabItemCenter,
-                active && !isCenter && styles.tabItemActive,
-                pressed && styles.tabItemPressed,
-              ]}
+              style={[styles.tabItem, isCenter && styles.tabItemCenter, active && !isCenter && styles.tabItemActive]}
             >
               {isCenter ? (
                 <View style={[styles.tabPlusButton, quickAddOpen && styles.tabPlusButtonActive]}>
@@ -6623,83 +6028,24 @@ function MainAppTabs() {
 
 function RootNavigator() {
   const auth = useAuth();
-  const rootTransition = useRef(new Animated.Value(1)).current;
 
-  const targetRoute = useMemo(() => {
-    if (auth.loading) {
-      return "loading" as const;
-    }
-    if (!auth.user && !auth.pendingVerificationEmail) {
-      return "auth" as const;
-    }
-    if ((auth.user && !auth.user.email_verified) || auth.pendingVerificationEmail) {
-      return "verify" as const;
-    }
-    if (auth.user && auth.user.email_verified && !auth.user.onboarding_completed) {
-      return "onboarding" as const;
-    }
-    return "main" as const;
-  }, [auth.loading, auth.pendingVerificationEmail, auth.user]);
+  if (auth.loading) {
+    return <LoadingGate />;
+  }
 
-  const [visibleRoute, setVisibleRoute] = useState(targetRoute);
-  const [incomingRoute, setIncomingRoute] = useState<typeof targetRoute | null>(null);
+  if (!auth.user && !auth.pendingVerificationEmail) {
+    return <AuthStack />;
+  }
 
-  useEffect(() => {
-    if ((targetRoute === visibleRoute && !incomingRoute) || targetRoute === incomingRoute) {
-      return;
-    }
-    setIncomingRoute(targetRoute);
-    rootTransition.stopAnimation();
-    rootTransition.setValue(0);
-    Animated.timing(rootTransition, {
-      toValue: 1,
-      duration: 220,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: false,
-    }).start(({ finished }) => {
-      if (!finished) {
-        return;
-      }
-      setVisibleRoute(targetRoute);
-      setIncomingRoute(null);
-      rootTransition.setValue(1);
-    });
-  }, [incomingRoute, rootTransition, targetRoute, visibleRoute]);
+  if ((auth.user && !auth.user.email_verified) || auth.pendingVerificationEmail) {
+    return <VerifyEmailOnlyScreen />;
+  }
 
-  const renderRootRoute = useCallback(
-    (route: typeof targetRoute): ReactElement => {
-      if (route === "loading") {
-        return <LoadingGate />;
-      }
-      if (route === "auth") {
-        return <AuthStack />;
-      }
-      if (route === "verify") {
-        return <VerifyEmailOnlyScreen />;
-      }
-      if (route === "onboarding") {
-        return <OnboardingWizard />;
-      }
-      return <MainAppTabs />;
-    },
-    [],
-  );
+  if (auth.user && auth.user.email_verified && !auth.user.onboarding_completed) {
+    return <OnboardingWizard />;
+  }
 
-  const outgoingOpacity = rootTransition.interpolate({
-    inputRange: [0, 1],
-    outputRange: [1, 0],
-  });
-
-  return (
-    <View style={styles.crossfadeHost}>
-      <Animated.View style={[styles.crossfadeLayer, incomingRoute ? { opacity: outgoingOpacity } : null]} pointerEvents={incomingRoute ? "none" : "auto"}>
-        {renderRootRoute(visibleRoute)}
-      </Animated.View>
-      {incomingRoute ? (
-        <Animated.View style={[styles.crossfadeLayer, { opacity: rootTransition }]}>{renderRootRoute(incomingRoute)}</Animated.View>
-      ) : null}
-    </View>
-  );
+  return <MainAppTabs />;
 }
 
 export default function App() {
@@ -6713,15 +6059,6 @@ export default function App() {
 
 const styles = StyleSheet.create({
   flex1: { flex: 1 },
-  crossfadeHost: {
-    flex: 1,
-    position: "relative",
-    backgroundColor: theme.bg,
-  },
-  crossfadeLayer: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: theme.bg,
-  },
   screen: {
     flex: 1,
     backgroundColor: theme.bg,
@@ -6734,15 +6071,18 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   headerWrap: {
-    gap: 5,
+    gap: 6,
   },
   headerTitle: {
     color: theme.text,
-    ...type.h1,
+    fontSize: 30,
+    fontWeight: "800",
+    letterSpacing: 0.3,
   },
   headerSubtitle: {
     color: theme.muted,
-    ...type.body,
+    fontSize: 13,
+    lineHeight: 19,
   },
   authScroll: {
     padding: 20,
@@ -6764,114 +6104,67 @@ const styles = StyleSheet.create({
   },
   brandTitle: {
     color: theme.text,
-    ...type.h1,
+    fontSize: 30,
+    fontWeight: "800",
+    lineHeight: 34,
   },
   brandText: {
     color: theme.muted,
-    ...type.body,
+    fontSize: 15,
+    lineHeight: 22,
   },
   fieldWrap: {
-    gap: 7,
+    gap: 8,
   },
   fieldLabel: {
     color: theme.text,
-    fontSize: 12,
-    fontWeight: "700",
-    letterSpacing: 0.2,
-    textTransform: "uppercase",
+    fontSize: 13,
+    fontWeight: "600",
   },
   input: {
     borderWidth: 1,
     borderColor: theme.border,
-    borderRadius: 16,
+    borderRadius: 14,
     paddingHorizontal: 14,
-    paddingVertical: 13,
+    paddingVertical: 12,
     color: theme.text,
-    backgroundColor: "#151515",
-    fontSize: 15,
+    backgroundColor: theme.panelSoft,
   },
   primaryButton: {
     backgroundColor: theme.accent,
     borderWidth: 1,
     borderColor: theme.accent,
-    borderRadius: 17,
-    minHeight: 50,
-    paddingVertical: 13,
+    borderRadius: 16,
+    paddingVertical: 15,
     alignItems: "center",
     justifyContent: "center",
-    shadowColor: "#ffffff",
-    shadowOpacity: 0.12,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 2,
-  },
-  primaryButtonPressed: {
-    opacity: 0.92,
-    transform: [{ scale: 0.985 }],
   },
   primaryButtonText: {
     color: "#050505",
     fontSize: 15,
-    fontWeight: "800",
+    fontWeight: "700",
   },
   secondaryButton: {
     borderWidth: 1,
     borderColor: theme.border,
     borderRadius: 16,
-    minHeight: 46,
-    paddingVertical: 11,
+    paddingVertical: 12,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: theme.panelSoft,
   },
-  secondaryButtonPressed: {
-    backgroundColor: "#1e1e1e",
-    transform: [{ scale: 0.985 }],
-  },
   secondaryButtonText: {
     color: theme.text,
-    fontWeight: "700",
+    fontWeight: "600",
     fontSize: 14,
   },
-  ghostButton: {
-    borderRadius: 14,
-    paddingVertical: 11,
-    paddingHorizontal: 12,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  ghostButtonPressed: {
-    backgroundColor: "rgba(255,255,255,0.06)",
-  },
-  ghostButtonText: {
-    color: theme.muted,
-    fontSize: 13,
-    fontWeight: "700",
-  },
   disabledButton: {
-    opacity: 0.55,
+    opacity: 0.6,
   },
   helperText: {
     color: theme.muted,
-    ...type.body,
-  },
-  passwordStrengthWrap: {
-    marginTop: -4,
-    gap: 6,
-  },
-  passwordStrengthTrack: {
-    height: 6,
-    borderRadius: 999,
-    backgroundColor: "#2b2b2f",
-    overflow: "hidden",
-  },
-  passwordStrengthFill: {
-    height: "100%",
-    borderRadius: 999,
-  },
-  passwordStrengthText: {
-    fontSize: 12,
-    fontWeight: "700",
+    fontSize: 13,
+    lineHeight: 19,
   },
   devHint: {
     color: theme.warning,
@@ -6891,10 +6184,6 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     backgroundColor: theme.panelSoft,
   },
-  chipPressed: {
-    opacity: 0.85,
-    transform: [{ scale: 0.98 }],
-  },
   chipActive: {
     borderColor: theme.accent,
     backgroundColor: theme.accentSoft,
@@ -6908,57 +6197,49 @@ const styles = StyleSheet.create({
     color: theme.text,
   },
   appCard: {
-    borderRadius: 22,
-    borderWidth: 1,
-    borderColor: "#222222",
-    backgroundColor: "#121212",
-    padding: 17,
-    gap: 13,
-    shadowColor: "#000",
-    shadowOpacity: 0.24,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 7 },
-    elevation: 3,
-  },
-  heroCardShell: {
     borderRadius: 24,
-    padding: 20,
-    backgroundColor: "#0f1012",
-    borderColor: "#2b2d31",
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: theme.panel,
+    padding: 18,
+    gap: 14,
+    shadowColor: "#000",
+    shadowOpacity: 0.22,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 3,
   },
   sectionHeaderWrap: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    gap: 12,
+    gap: 10,
   },
   sectionHeaderLeft: {
     flex: 1,
-    gap: 3,
+    gap: 2,
   },
   sectionHeaderTitle: {
     color: theme.text,
-    ...type.h3,
+    fontSize: 17,
+    fontWeight: "700",
   },
   sectionHeaderSubtitle: {
     color: theme.muted,
-    ...type.caption,
+    fontSize: 12,
   },
   sectionHeaderAction: {
-    borderWidth: 0,
-    backgroundColor: "transparent",
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: theme.panelSoft,
     borderRadius: 999,
-    paddingHorizontal: 9,
-    paddingVertical: 6,
-  },
-  sectionHeaderActionPressed: {
-    backgroundColor: "rgba(255,255,255,0.08)",
+    paddingHorizontal: 10,
+    paddingVertical: 7,
   },
   sectionHeaderActionText: {
-    color: "#d6d6d6",
+    color: theme.text,
     fontSize: 12,
     fontWeight: "700",
-    letterSpacing: 0.2,
   },
   statPill: {
     borderRadius: 999,
@@ -7010,23 +6291,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "700",
   },
-  inlineInfoRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 10,
-    paddingVertical: 4,
-  },
-  inlineInfoLabel: {
-    color: theme.muted,
-    ...type.caption,
-  },
-  inlineInfoValue: {
-    color: theme.text,
-    fontSize: 14,
-    fontWeight: "800",
-    letterSpacing: 0.1,
-  },
   statRow: {
     borderWidth: 1,
     borderColor: theme.border,
@@ -7048,6 +6312,23 @@ const styles = StyleSheet.create({
     color: theme.text,
     fontSize: 13,
     fontWeight: "700",
+  },
+  settingsHeroCard: {
+    gap: 10,
+    backgroundColor: "#0f1115",
+    borderColor: "#2a2f38",
+  },
+  settingsStatusRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  settingsInlineActions: {
+    gap: 8,
+    marginTop: 2,
+  },
+  settingsCollapsedSummary: {
+    gap: 6,
   },
   statPillLabel: {
     color: theme.muted,
@@ -7071,72 +6352,25 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  avatarPressable: {
-    borderRadius: 999,
-  },
-  avatarPressablePressed: {
-    opacity: 0.85,
-    transform: [{ scale: 0.97 }],
-  },
   avatarText: {
     color: theme.text,
     fontWeight: "800",
     fontSize: 15,
   },
-  accountMenuLayer: {
-    ...StyleSheet.absoluteFillObject,
-    paddingHorizontal: 16,
-    paddingTop: 68,
-    alignItems: "flex-end",
-  },
-  accountMenuBackdrop: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  accountMenuScrim: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(0,0,0,0.44)",
-  },
-  accountMenuContainer: {
-    width: "86%",
-    maxWidth: 340,
-  },
-  accountMenuCard: {
-    borderWidth: 1,
-    borderColor: theme.border,
-    borderRadius: 18,
-    backgroundColor: "#15181f",
-    padding: 14,
-    gap: 10,
-  },
-  accountMenuTitle: {
-    color: theme.text,
-    fontSize: 15,
-    fontWeight: "800",
-    letterSpacing: 0.2,
-  },
   emptyStateCard: {
     alignItems: "center",
     justifyContent: "center",
-    borderWidth: 1,
-    borderRadius: 16,
-    paddingHorizontal: 14,
-    paddingVertical: 16,
-    backgroundColor: "#111214",
-    borderColor: "#2a2c30",
-    minHeight: 128,
-    gap: 7,
   },
   emptyStateTitle: {
     color: theme.text,
-    fontWeight: "800",
+    fontWeight: "700",
     fontSize: 15,
-    textAlign: "center",
   },
   emptyStateSubtitle: {
     color: theme.muted,
     fontSize: 13,
     textAlign: "center",
-    lineHeight: 20,
+    lineHeight: 19,
   },
   sectionCard: {
     borderRadius: 24,
@@ -7232,10 +6466,9 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   mainScroll: {
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    gap: 16,
-    paddingBottom: 104,
+    padding: 16,
+    gap: 14,
+    paddingBottom: 90,
   },
   dashboardHeaderRow: {
     flexDirection: "row",
@@ -7247,11 +6480,13 @@ const styles = StyleSheet.create({
   },
   dashboardGreeting: {
     color: theme.text,
-    ...type.h2,
+    fontSize: 24,
+    fontWeight: "800",
+    letterSpacing: 0.2,
   },
   dashboardDate: {
     color: theme.muted,
-    ...type.caption,
+    fontSize: 13,
     marginTop: 2,
   },
   quickWeightBtn: {
@@ -7278,37 +6513,13 @@ const styles = StyleSheet.create({
   },
   heroRemainingValue: {
     color: theme.text,
-    ...type.display,
+    fontSize: 48,
+    fontWeight: "800",
+    lineHeight: 52,
   },
   heroRemainingSub: {
     color: theme.muted,
-    ...type.body,
-  },
-  heroMiniGrid: {
-    flexDirection: "row",
-    gap: 8,
-    flexWrap: "wrap",
-  },
-  heroMiniCard: {
-    flex: 1,
-    minWidth: 86,
-    borderWidth: 1,
-    borderColor: "#2c2f35",
-    borderRadius: 14,
-    backgroundColor: "#14161a",
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    gap: 2,
-  },
-  heroMiniLabel: {
-    color: theme.muted,
-    ...type.caption,
-  },
-  heroMiniValue: {
-    color: theme.text,
-    fontSize: 16,
-    fontWeight: "800",
-    letterSpacing: -0.1,
+    fontSize: 13,
   },
   heroProgressTrack: {
     height: 12,
@@ -7327,82 +6538,32 @@ const styles = StyleSheet.create({
     gap: 8,
     flexWrap: "wrap",
   },
-  dashboardActionGrid: {
+  dashboardQuickActionsRow: {
     flexDirection: "row",
-    flexWrap: "wrap",
     gap: 10,
   },
-  dashboardActionCard: {
-    width: "48%",
+  dashboardQuickActionBtn: {
+    flex: 1,
     borderWidth: 1,
-    borderColor: "#2a2a2a",
+    borderColor: theme.border,
     borderRadius: 16,
-    backgroundColor: "#171717",
-    paddingVertical: 12,
+    backgroundColor: theme.panelSoft,
+    paddingVertical: 14,
     paddingHorizontal: 12,
-    gap: 5,
-    minHeight: 108,
+    gap: 4,
   },
-  dashboardActionCardPressed: {
-    opacity: 0.9,
-    transform: [{ scale: 0.985 }],
-  },
-  dashboardActionIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: 999,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  dashboardActionWeightIcon: {
+  dashboardQuickActionTitle: {
     color: theme.text,
-    fontSize: 13,
-    fontWeight: "800",
-    letterSpacing: 0.2,
-  },
-  dashboardActionTitle: {
-    color: theme.text,
-    fontWeight: "800",
+    fontWeight: "700",
     fontSize: 14,
   },
-  dashboardActionSubtitle: {
+  dashboardQuickActionSub: {
     color: theme.muted,
-    fontSize: 11,
-    lineHeight: 15,
+    fontSize: 12,
   },
   macroToggleRow: {
     flexDirection: "row",
     gap: 8,
-  },
-  segmentedWrap: {
-    flexDirection: "row",
-    gap: 8,
-    backgroundColor: "#121316",
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: "#2a2d31",
-    padding: 4,
-  },
-  segmentedItem: {
-    flex: 1,
-    minHeight: 34,
-    borderRadius: 999,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 10,
-  },
-  segmentedItemPressed: {
-    opacity: 0.88,
-  },
-  segmentedItemActive: {
-    backgroundColor: "#252932",
-  },
-  segmentedText: {
-    color: theme.muted,
-    ...type.caption,
-  },
-  segmentedTextActive: {
-    color: theme.text,
   },
   macroToggleChip: {
     borderWidth: 1,
@@ -7459,7 +6620,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    gap: 14,
+    gap: 12,
   },
   bodyPageHeaderCopy: {
     flex: 1,
@@ -7467,29 +6628,26 @@ const styles = StyleSheet.create({
   },
   bodyPageTitle: {
     color: theme.text,
-    ...type.h1,
+    fontSize: 28,
+    fontWeight: "800",
+    letterSpacing: -0.3,
   },
   bodyPageSubtitle: {
     color: theme.muted,
-    ...type.body,
+    fontSize: 13,
   },
   bodyHeaderActionBtn: {
     borderWidth: 1,
-    borderColor: "#2b2b2b",
-    borderRadius: 14,
-    backgroundColor: "#161616",
-    paddingHorizontal: 13,
-    paddingVertical: 10,
-  },
-  bodyHeaderActionBtnPressed: {
-    opacity: 0.88,
-    transform: [{ scale: 0.98 }],
+    borderColor: theme.border,
+    borderRadius: 12,
+    backgroundColor: theme.panelSoft,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
   },
   bodyHeaderActionText: {
     color: theme.text,
     fontSize: 12,
-    fontWeight: "800",
-    letterSpacing: 0.2,
+    fontWeight: "700",
   },
   bodyQuickWeightRow: {
     flexDirection: "row",
@@ -7503,14 +6661,10 @@ const styles = StyleSheet.create({
   bodyQuickWeightActions: {
     gap: 8,
   },
-  bodySummaryHero: {
-    backgroundColor: "#0e1014",
-    borderColor: "#2f333b",
-  },
   bodySummaryGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 9,
+    gap: 8,
   },
   bodyLegendRow: {
     flexDirection: "row",
@@ -7569,7 +6723,7 @@ const styles = StyleSheet.create({
   },
   metricTileValue: {
     color: theme.text,
-    fontSize: 17,
+    fontSize: 16,
     fontWeight: "800",
   },
   metricTileSubtitle: {
@@ -7579,10 +6733,10 @@ const styles = StyleSheet.create({
   weightChartWrap: {
     minHeight: 126,
     borderWidth: 1,
-    borderColor: "#2a2a2a",
-    borderRadius: 16,
-    backgroundColor: "#161616",
-    padding: 11,
+    borderColor: theme.border,
+    borderRadius: 14,
+    backgroundColor: theme.panelSoft,
+    padding: 10,
     flexDirection: "row",
     alignItems: "flex-end",
     gap: 6,
@@ -7627,9 +6781,9 @@ const styles = StyleSheet.create({
   },
   bodyRecordRow: {
     borderWidth: 1,
-    borderColor: "#2b2b2b",
-    borderRadius: 14,
-    backgroundColor: "#171717",
+    borderColor: theme.border,
+    borderRadius: 12,
+    backgroundColor: theme.panelSoft,
     paddingHorizontal: 12,
     paddingVertical: 10,
     flexDirection: "row",
@@ -7656,9 +6810,9 @@ const styles = StyleSheet.create({
   bodyMeasurementSummary: {
     marginTop: 8,
     borderWidth: 1,
-    borderColor: "#2b2b2b",
-    borderRadius: 14,
-    backgroundColor: "#151515",
+    borderColor: theme.border,
+    borderRadius: 12,
+    backgroundColor: theme.panelSoft,
     padding: 10,
     gap: 4,
   },
@@ -7848,13 +7002,13 @@ const styles = StyleSheet.create({
   },
   intakeRow: {
     borderWidth: 1,
-    borderColor: "#2a2d31",
-    borderRadius: 14,
-    padding: 11,
+    borderColor: theme.border,
+    borderRadius: 12,
+    padding: 10,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    backgroundColor: "#141518",
+    backgroundColor: theme.panelSoft,
     gap: 10,
   },
   intakeTimeDotWrap: {
@@ -7866,7 +7020,7 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 999,
-    backgroundColor: theme.kcal,
+    backgroundColor: theme.accent,
   },
   intakeMain: {
     flex: 1,
@@ -7874,16 +7028,16 @@ const styles = StyleSheet.create({
   },
   intakeName: {
     color: theme.text,
-    fontWeight: "700",
+    fontWeight: "600",
     fontSize: 14,
   },
   intakeMeta: {
     color: theme.muted,
-    ...type.caption,
+    fontSize: 12,
   },
   intakeKcal: {
-    color: theme.kcal,
-    fontWeight: "800",
+    color: theme.text,
+    fontWeight: "700",
     fontSize: 13,
   },
   intakeRight: {
@@ -7903,12 +7057,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "flex-start",
     gap: 8,
-    backgroundColor: "#141518",
-    borderWidth: 1,
-    borderColor: "#25282e",
-    borderRadius: 12,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
   },
   insightDot: {
     width: 8,
@@ -7929,15 +7077,14 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   historyCalendarCard: {
-    gap: 16,
-    backgroundColor: "#111111",
+    gap: 14,
   },
   historyCalendarTopRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     gap: 12,
-    marginBottom: 0,
+    marginBottom: 2,
   },
   historyCalendarTitleWrap: {
     flex: 1,
@@ -7945,11 +7092,13 @@ const styles = StyleSheet.create({
   },
   historyCalendarTitle: {
     color: theme.text,
-    ...type.h2,
+    fontSize: 19,
+    fontWeight: "800",
+    letterSpacing: -0.2,
   },
   historyCalendarSubtitle: {
-    color: "#95959d",
-    ...type.caption,
+    color: "#8b8b93",
+    fontSize: 12,
   },
   historyCalendarReloadBtn: {
     paddingHorizontal: 6,
@@ -7960,7 +7109,7 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.08)",
   },
   historyCalendarReloadText: {
-    color: "#dfdfe2",
+    color: "#d4d4d8",
     fontSize: 12,
     fontWeight: "700",
     letterSpacing: 0.2,
@@ -7970,8 +7119,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 2,
-    paddingTop: 2,
-    paddingBottom: 2,
+    paddingTop: 4,
+    paddingBottom: 4,
   },
   historyCalendarArrowTouch: {
     width: 36,
@@ -7992,20 +7141,20 @@ const styles = StyleSheet.create({
   historyCalendarStreakBadge: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 11,
+    gap: 10,
     borderRadius: 999,
-    paddingHorizontal: 13,
-    paddingVertical: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
   },
   historyCalendarStreakBadgeActive: {
-    backgroundColor: "rgba(255,255,255,0.09)",
+    backgroundColor: "rgba(255,255,255,0.08)",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.16)",
+    borderColor: "rgba(255,255,255,0.12)",
   },
   historyCalendarStreakBadgeIdle: {
-    backgroundColor: "rgba(255,255,255,0.035)",
+    backgroundColor: "rgba(255,255,255,0.03)",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.11)",
+    borderColor: "rgba(255,255,255,0.08)",
   },
   historyCalendarStreakTextWrap: {
     flex: 1,
@@ -8013,7 +7162,7 @@ const styles = StyleSheet.create({
   },
   historyCalendarStreakTitle: {
     color: theme.text,
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: "800",
   },
   historyCalendarStreakSubtitle: {
@@ -8041,8 +7190,8 @@ const styles = StyleSheet.create({
   historyWeekDaysRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    paddingHorizontal: 7,
-    marginTop: 0,
+    paddingHorizontal: 6,
+    marginTop: 2,
   },
   historyWeekDayLabel: {
     width: `${100 / 7}%`,
@@ -8054,16 +7203,16 @@ const styles = StyleSheet.create({
   },
   historyCalendarMonthLabel: {
     color: theme.text,
-    fontSize: 18,
-    fontWeight: "800",
+    fontSize: 17,
+    fontWeight: "700",
     letterSpacing: -0.2,
     textTransform: "capitalize",
   },
   historyCalendarGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 7,
-    marginTop: 2,
+    gap: 6,
+    marginTop: 4,
   },
   historyCalendarCellEmpty: {
     width: "13.2%",
@@ -8074,10 +7223,10 @@ const styles = StyleSheet.create({
   historyCalendarCell: {
     width: "13.2%",
     aspectRatio: 1,
-    borderRadius: 13,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.03)",
-    backgroundColor: "#131313",
+    borderColor: "rgba(255,255,255,0.035)",
+    backgroundColor: "#101010",
     paddingHorizontal: 6,
     paddingVertical: 5,
     justifyContent: "space-between",
@@ -8087,28 +7236,28 @@ const styles = StyleSheet.create({
     transform: [{ scale: 0.98 }],
   },
   historyCalendarCellFilled: {
-    borderColor: "rgba(255,255,255,0.08)",
-    backgroundColor: "#171717",
+    borderColor: "rgba(255,255,255,0.07)",
+    backgroundColor: "#141414",
   },
   historyCalendarCellHasWeight: {
-    backgroundColor: "#151a1f",
+    backgroundColor: "#13171c",
   },
   historyCalendarCellToday: {
-    borderColor: "rgba(255,255,255,0.28)",
+    borderColor: "rgba(255,255,255,0.22)",
   },
   historyCalendarCellActive: {
-    borderColor: "rgba(255,255,255,0.94)",
-    backgroundColor: "#1d1d1d",
+    borderColor: "rgba(255,255,255,0.92)",
+    backgroundColor: "#1a1a1a",
     shadowColor: "#ffffff",
-    shadowOpacity: 0.1,
-    shadowRadius: 9,
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
     shadowOffset: { width: 0, height: 1 },
     elevation: 2,
   },
   historyCalendarDayText: {
     color: "#d9d9de",
     fontSize: 12,
-    fontWeight: "700",
+    fontWeight: "600",
   },
   historyCalendarDayTextToday: {
     color: "#ffffff",
@@ -8126,14 +7275,14 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   historyCalendarFoodDot: {
-    width: 4,
-    height: 4,
+    width: 5,
+    height: 5,
     borderRadius: 999,
     backgroundColor: "#ededf0",
   },
   historyCalendarWeightDot: {
-    width: 5,
-    height: 5,
+    width: 6,
+    height: 6,
     borderRadius: 999,
     borderWidth: 1,
     borderColor: theme.kcal,
@@ -8142,7 +7291,7 @@ const styles = StyleSheet.create({
   historyLegendRow: {
     flexDirection: "row",
     gap: 14,
-    marginTop: 4,
+    marginTop: 8,
     marginBottom: 2,
   },
   historyLegendItem: {
@@ -8222,23 +7371,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "600",
   },
-  settingsInlineActions: {
-    gap: 8,
-    marginTop: 2,
-  },
-  settingsHeroCard: {
-    gap: 10,
-    backgroundColor: "#0f1115",
-    borderColor: "#2a2f38",
-  },
-  settingsStatusRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-  },
-  settingsCollapsedSummary: {
-    gap: 3,
-  },
   addHubPane: {
     gap: 12,
     paddingBottom: 100,
@@ -8251,10 +7383,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 18,
     gap: 6,
-  },
-  addActionCardPressed: {
-    opacity: 0.9,
-    transform: [{ scale: 0.985 }],
   },
   addActionTitle: {
     color: theme.text,
@@ -8705,10 +7833,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 8,
   },
-  quickAddCardPressed: {
-    opacity: 0.92,
-    transform: [{ scale: 0.985 }],
-  },
   quickAddIconWrap: {
     width: 56,
     height: 56,
@@ -8732,21 +7856,21 @@ const styles = StyleSheet.create({
     position: "absolute",
     left: 14,
     right: 14,
-    bottom: 10,
+    bottom: 12,
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#101010",
+    backgroundColor: theme.panel,
     borderRadius: 18,
     borderWidth: 1,
-    borderColor: "#252525",
+    borderColor: theme.border,
     paddingHorizontal: 8,
-    paddingTop: 7,
-    paddingBottom: 9,
+    paddingTop: 8,
+    paddingBottom: 10,
     gap: 0,
   },
   tabItem: {
     flex: 1,
-    minHeight: 52,
+    minHeight: 54,
     paddingVertical: 6,
     borderRadius: 12,
     alignItems: "center",
@@ -8759,12 +7883,9 @@ const styles = StyleSheet.create({
   tabItemActive: {
     backgroundColor: "#252525",
   },
-  tabItemPressed: {
-    opacity: 0.86,
-  },
   tabPlusButton: {
-    width: 54,
-    height: 54,
+    width: 58,
+    height: 58,
     borderRadius: 999,
     borderWidth: 1,
     borderColor: "#1f6ed3",
@@ -8774,9 +7895,9 @@ const styles = StyleSheet.create({
     marginTop: 0,
     shadowColor: "#0f58ad",
     shadowOpacity: 0.35,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 5,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 5 },
+    elevation: 6,
   },
   tabPlusButtonActive: {
     backgroundColor: "#63afff",
@@ -8785,14 +7906,14 @@ const styles = StyleSheet.create({
   tabPlusText: {
     color: "#04101f",
     fontWeight: "800",
-    fontSize: 32,
-    lineHeight: 32,
-    marginTop: -1,
+    fontSize: 34,
+    lineHeight: 34,
+    marginTop: -2,
   },
   tabText: {
     color: theme.muted,
     fontWeight: "700",
-    fontSize: 10,
+    fontSize: 11,
   },
   tabTextActive: {
     color: theme.text,
