@@ -2974,11 +2974,9 @@ function DashboardScreen({
         </View>
 
         <HeroCard style={[styles.heroCard, exceededKcal && styles.heroCardExceeded]}>
-          <SectionHeader title="Resumen del día" subtitle="Kcal restantes" />
+          <SectionHeader title="Resumen del día" subtitle="Balance energético de hoy" />
           <Text style={styles.heroRemainingValue}>{kcalGoal > 0 ? kcalRemaining : "-"}</Text>
-          <Text style={styles.heroRemainingSub}>
-            {Math.round(kcalConsumed)} consumidas / {Math.round(kcalGoal)} objetivo
-          </Text>
+          <Text style={styles.heroRemainingSub}>kcal restantes</Text>
           <View style={styles.heroProgressTrack}>
             <View
               style={[
@@ -2986,6 +2984,20 @@ function DashboardScreen({
                 { width: `${kcalProgress * 100}%`, backgroundColor: exceededKcal ? theme.danger : theme.kcal },
               ]}
             />
+          </View>
+          <View style={styles.heroMiniGrid}>
+            <View style={styles.heroMiniCard}>
+              <Text style={styles.heroMiniLabel}>Objetivo</Text>
+              <Text style={styles.heroMiniValue}>{Math.round(kcalGoal)}</Text>
+            </View>
+            <View style={styles.heroMiniCard}>
+              <Text style={styles.heroMiniLabel}>Consumidas</Text>
+              <Text style={styles.heroMiniValue}>{Math.round(kcalConsumed)}</Text>
+            </View>
+            <View style={styles.heroMiniCard}>
+              <Text style={styles.heroMiniLabel}>Restantes</Text>
+              <Text style={[styles.heroMiniValue, exceededKcal && { color: theme.danger }]}>{kcalGoal > 0 ? kcalRemaining : "-"}</Text>
+            </View>
           </View>
           <View style={styles.heroPillsRow}>
             <StatusBadge label={exceededKcal ? "Sobre objetivo" : "En rango"} tone={exceededKcal ? "danger" : "accent"} />
@@ -7242,6 +7254,32 @@ const styles = StyleSheet.create({
     color: theme.muted,
     ...type.body,
   },
+  heroMiniGrid: {
+    flexDirection: "row",
+    gap: 8,
+    flexWrap: "wrap",
+  },
+  heroMiniCard: {
+    flex: 1,
+    minWidth: 86,
+    borderWidth: 1,
+    borderColor: "#2c2f35",
+    borderRadius: 14,
+    backgroundColor: "#14161a",
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    gap: 2,
+  },
+  heroMiniLabel: {
+    color: theme.muted,
+    ...type.caption,
+  },
+  heroMiniValue: {
+    color: theme.text,
+    fontSize: 16,
+    fontWeight: "800",
+    letterSpacing: -0.1,
+  },
   heroProgressTrack: {
     height: 12,
     borderRadius: 999,
@@ -7776,13 +7814,13 @@ const styles = StyleSheet.create({
   },
   intakeRow: {
     borderWidth: 1,
-    borderColor: theme.border,
-    borderRadius: 12,
-    padding: 10,
+    borderColor: "#2a2d31",
+    borderRadius: 14,
+    padding: 11,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    backgroundColor: theme.panelSoft,
+    backgroundColor: "#141518",
     gap: 10,
   },
   intakeTimeDotWrap: {
@@ -7794,7 +7832,7 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 999,
-    backgroundColor: theme.accent,
+    backgroundColor: theme.kcal,
   },
   intakeMain: {
     flex: 1,
@@ -7802,16 +7840,16 @@ const styles = StyleSheet.create({
   },
   intakeName: {
     color: theme.text,
-    fontWeight: "600",
+    fontWeight: "700",
     fontSize: 14,
   },
   intakeMeta: {
     color: theme.muted,
-    fontSize: 12,
+    ...type.caption,
   },
   intakeKcal: {
-    color: theme.text,
-    fontWeight: "700",
+    color: theme.kcal,
+    fontWeight: "800",
     fontSize: 13,
   },
   intakeRight: {
@@ -7831,6 +7869,12 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "flex-start",
     gap: 8,
+    backgroundColor: "#141518",
+    borderWidth: 1,
+    borderColor: "#25282e",
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
   },
   insightDot: {
     width: 8,
