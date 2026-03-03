@@ -536,6 +536,7 @@ type Segment = {
 
 const TOKEN_STORAGE_KEY = "nutri_tracker_access_token";
 const DEV_SETTINGS_MODE = (process.env.EXPO_PUBLIC_DEV_SETTINGS ?? "false").toLowerCase() === "true";
+const COMMUNITY_BARCODE_PATTERN = /^\d{8,14}$/;
 const CALENDAR_LEFT_ARROW_PATH =
   "M98.44,0H24.44C17.75,0,11.67,2.75,7.24,7.17C2.77,11.64,0,17.82,0,24.62v67.35c0,6.8,2.78,12.98,7.25,17.45 c4.42,4.42,10.51,7.17,17.19,7.17h74.01c6.68,0,12.77-2.75,17.19-7.17c4.47-4.47,7.24-10.65,7.24-17.45V24.62 c0-6.81-2.77-12.99-7.24-17.45C111.21,2.75,105.13,0,98.44,0L98.44,0z M50.64,46.95h28.33c0.85,0,1.62,0.34,2.17,0.9 c0.56,0.56,0.9,1.33,0.9,2.17c0,0.85-0.34,1.62-0.9,2.17c-0.56,0.56-1.32,0.9-2.17,0.9H50.64l9.53,10.92 c0.55,0.63,0.8,1.43,0.76,2.21c-0.05,0.79-0.39,1.55-1.02,2.12c-0.63,0.56-1.43,0.81-2.21,0.77c-0.78-0.05-1.54-0.39-2.1-1.02 l-14-16.04c-0.52-0.59-0.77-1.33-0.77-2.06c0.01-0.73,0.28-1.46,0.8-2.02l14-16.03c0.56-0.61,1.31-0.95,2.08-1 c0.78-0.05,1.57,0.21,2.2,0.77l0.02,0.02c0.62,0.56,0.95,1.32,1,2.09v0.01c0.04,0.78-0.21,1.58-0.77,2.21L50.64,46.95L50.64,46.95z M117.95,82.85c-0.85,3.45-2.55,6.55-4.83,9.01c-3.36,3.62-7.99,5.87-13.1,5.87H22.85c-0.21,0-0.41,0-0.62-0.01l-1.25-0.09 c-4.36-0.47-8.29-2.6-11.23-5.77c-2.28-2.46-3.97-5.55-4.83-9V24.62c0-5.28,2.17-10.09,5.67-13.58C14.14,7.5,19.04,5.3,24.44,5.3 h74.01c5.4,0,10.3,2.2,13.84,5.74c3.49,3.49,5.66,8.3,5.66,13.58V82.85L117.95,82.85z";
 const CALENDAR_RIGHT_ARROW_PATH =
@@ -647,6 +648,12 @@ function parseApiError(error: unknown): string {
   }
   if (message.includes("Invalid email")) {
     return "El email no tiene un formato válido.";
+  }
+  if (message.includes("Invalid EAN/UPC")) {
+    return "El código de barras debe tener entre 8 y 14 dígitos.";
+  }
+  if (message.includes("String should have at least")) {
+    return "Hay campos con menos caracteres de los requeridos.";
   }
 
   return message;
@@ -839,10 +846,32 @@ function AuthProvider({ children }: { children: import("react").ReactNode }) {
       }
 
       if (!response.ok) {
-        const detail =
-          typeof body === "object" && body !== null
-            ? ((body as { detail?: string }).detail ?? (body as { message?: string }).message)
-            : undefined;
+        let detail: string | undefined;
+
+        if (typeof body === "object" && body !== null) {
+          const detailValue = (body as { detail?: unknown }).detail ?? (body as { message?: unknown }).message;
+          if (typeof detailValue === "string") {
+            detail = detailValue;
+          } else if (Array.isArray(detailValue)) {
+            const first = detailValue[0];
+            if (typeof first === "string") {
+              detail = first;
+            } else if (first && typeof first === "object") {
+              const msg = (first as { msg?: string }).msg;
+              const loc = (first as { loc?: Array<string | number> }).loc;
+              if (msg && Array.isArray(loc) && loc.length > 0) {
+                detail = `${loc.join(".")}: ${msg}`;
+              } else if (msg) {
+                detail = msg;
+              }
+            }
+          } else if (detailValue != null) {
+            detail = String(detailValue);
+          }
+        } else if (typeof body === "string" && body.trim()) {
+          detail = body;
+        }
+
         throw new Error(detail ?? `HTTP ${response.status}`);
       }
 
@@ -4968,9 +4997,19 @@ function AddScreen(props: { launchAction: AddLaunchAction | null; onLaunchAction
     const protein = Number(manualProtein);
     const fat = Number(manualFat);
     const carbs = Number(manualCarbs);
+    const trimmedName = manualName.trim();
+    const trimmedBarcode = manualBarcode.trim();
 
-    if (!manualName.trim()) {
+    if (!trimmedName) {
       Alert.alert("Manual", "El nombre es obligatorio.");
+      return;
+    }
+    if (trimmedName.length < 2) {
+      Alert.alert("Manual", "El nombre debe tener al menos 2 caracteres.");
+      return;
+    }
+    if (trimmedBarcode && !COMMUNITY_BARCODE_PATTERN.test(trimmedBarcode)) {
+      Alert.alert("Manual", "El barcode debe tener entre 8 y 14 dígitos.");
       return;
     }
     if (![kcal, protein, fat, carbs].every((value) => Number.isFinite(value) && value >= 0)) {
@@ -4981,8 +5020,8 @@ function AddScreen(props: { launchAction: AddLaunchAction | null; onLaunchAction
     setSaving(true);
     try {
       const response = await auth.createCommunityFood({
-        barcode: manualBarcode.trim() || undefined,
-        name: manualName.trim(),
+        barcode: trimmedBarcode || undefined,
+        name: trimmedName,
         brand: manualBrand.trim() || undefined,
         imageUrl: manualImageUrl.trim() || undefined,
         nutrition_basis: "per_100g",
