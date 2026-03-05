@@ -14,6 +14,7 @@ from app.services.nutrition import sanitize_numeric_values
 
 ConfidenceLevel = Literal["high", "medium", "low"]
 VisionModel = Literal["gpt-4o-mini", "gpt-5.1"]
+AppLocale = Literal["es", "en"]
 SUPPORTED_VISION_MODELS = {"gpt-4o-mini", "gpt-5.1"}
 MEAL_ESTIMATE_MODEL: Literal["gpt-4o-mini"] = "gpt-4o-mini"
 
@@ -100,6 +101,149 @@ def _normalize_confidence(value: Any) -> ConfidenceLevel:
         if lowered in {"high", "medium", "low"}:
             return lowered  # type: ignore[return-value]
     return "medium"
+
+
+def _min_confidence(left: ConfidenceLevel, right: ConfidenceLevel) -> ConfidenceLevel:
+    rank: dict[ConfidenceLevel, int] = {"low": 0, "medium": 1, "high": 2}
+    return left if rank[left] <= rank[right] else right
+
+
+def _normalize_locale(locale: str | None) -> AppLocale:
+    if locale and locale.strip().lower().startswith("en"):
+        return "en"
+    return "es"
+
+
+def _question_matches_portion(prompt: str) -> bool:
+    lowered = prompt.lower()
+    return any(
+        token in lowered
+        for token in {"portion", "ración", "racion", "small", "medium", "large", "peque", "mediana", "grande"}
+    )
+
+
+def _question_matches_added_fats(prompt: str) -> bool:
+    lowered = prompt.lower()
+    return any(token in lowered for token in {"aceite", "salsa", "mantequilla", "oil", "sauce", "butter"})
+
+
+def _question_matches_quantity(prompt: str) -> bool:
+    lowered = prompt.lower()
+    return any(
+        token in lowered
+        for token in {"cantidad", "gram", "peso", "quantity", "how much", "plate", "plato", "tbsp", "cucharada"}
+    )
+
+
+def _dedupe_question_items(question_items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    deduped: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in question_items:
+        prompt_key = str(item.get("prompt", "")).strip().lower()
+        if not prompt_key or prompt_key in seen:
+            continue
+        seen.add(prompt_key)
+        deduped.append(item)
+    return deduped
+
+
+def _prioritize_question_items(
+    *,
+    question_items: list[dict[str, Any]],
+    fallback_items: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    merged = _dedupe_question_items([*question_items, *fallback_items])
+
+    selected: list[dict[str, Any]] = []
+    used_ids: set[str] = set()
+
+    def _pick_by_match(match_fn: Any) -> None:
+        for item in merged:
+            item_id = str(item.get("id", "")).strip()
+            prompt = str(item.get("prompt", "")).strip()
+            if not prompt or item_id in used_ids:
+                continue
+            if match_fn(prompt):
+                selected.append(item)
+                used_ids.add(item_id)
+                return
+
+    _pick_by_match(_question_matches_portion)
+    _pick_by_match(_question_matches_added_fats)
+    _pick_by_match(_question_matches_quantity)
+
+    for item in merged:
+        item_id = str(item.get("id", "")).strip()
+        if item_id and item_id in used_ids:
+            continue
+        selected.append(item)
+        if item_id:
+            used_ids.add(item_id)
+        if len(selected) >= 3:
+            break
+
+    return selected[:3]
+
+
+def _confidence_rank(value: ConfidenceLevel) -> int:
+    return {"low": 0, "medium": 1, "high": 2}[value]
+
+
+def _rank_to_confidence(rank: int) -> ConfidenceLevel:
+    normalized = max(0, min(2, rank))
+    return ("low", "medium", "high")[normalized]  # type: ignore[return-value]
+
+
+def _degrade_confidence(value: ConfidenceLevel, *, steps: int = 1) -> ConfidenceLevel:
+    return _rank_to_confidence(_confidence_rank(value) - max(0, steps))
+
+
+def _count_unknown_answers(answers: list[str] | None) -> int:
+    if not answers:
+        return 0
+    count = 0
+    for item in answers:
+        lowered = str(item).lower()
+        if any(token in lowered for token in {"no sé", "no se", "unknown", "i don't know", "dont know"}):
+            count += 1
+    return count
+
+
+def _is_ambiguous_meal_description(description: str) -> bool:
+    lowered = description.lower()
+    ambiguous_tokens = {
+        "mixto",
+        "mezcla",
+        "plato del dia",
+        "pasta",
+        "ensalada",
+        "guiso",
+        "estofado",
+        "mixed",
+        "combo",
+        "salad",
+        "stew",
+        "casserole",
+    }
+    return any(token in lowered for token in ambiguous_tokens)
+
+
+def _coherence_adjust_nutrition(nutrition: dict[str, float]) -> tuple[dict[str, float], bool]:
+    adjusted = dict(nutrition)
+    protein = max(0.0, float(adjusted.get("protein_g", 0.0)))
+    carbs = max(0.0, float(adjusted.get("carbs_g", 0.0)))
+    fat = max(0.0, float(adjusted.get("fat_g", 0.0)))
+    kcal = max(0.0, float(adjusted.get("kcal", 0.0)))
+    kcal_from_macros = protein * 4 + carbs * 4 + fat * 9
+    if kcal_from_macros <= 0:
+        return adjusted, False
+
+    deviation = abs(kcal - kcal_from_macros) / max(1.0, kcal_from_macros)
+    degraded = deviation > 0.28
+    if kcal < kcal_from_macros * 0.82:
+        adjusted["kcal"] = round(kcal_from_macros * 1.04, 2)
+        degraded = True
+    return adjusted, degraded
 
 
 async def _image_urls_from_uploads(photo_files: list[UploadFile]) -> list[str]:
@@ -292,6 +436,23 @@ def _coerce_question_items(raw_value: Any) -> list[dict[str, Any]]:
         if not prompt:
             continue
 
+        if _question_matches_portion(prompt):
+            item_id = "portion_size"
+            answer_type = "single_choice"
+            if not options:
+                options = ["small", "medium", "large"]
+        elif _question_matches_added_fats(prompt):
+            item_id = "added_fats"
+            answer_type = "single_choice"
+            if not options:
+                options = ["yes", "no"]
+        elif _question_matches_quantity(prompt):
+            item_id = "quantity_note"
+            if answer_type == "text":
+                answer_type = "number"
+            if not placeholder:
+                placeholder = "250" if "¿" in prompt or "cantidad" in prompt.lower() else "250"
+
         if answer_type == "single_choice" and not options:
             options = ["yes", "no"]
         if answer_type != "single_choice":
@@ -307,10 +468,10 @@ def _coerce_question_items(raw_value: Any) -> list[dict[str, Any]]:
             }
         )
 
-    return items[:3]
+    return _dedupe_question_items(items)[:3]
 
 
-def _heuristic_question_items(heuristic_result: dict[str, Any]) -> list[dict[str, Any]]:
+def _heuristic_question_items(heuristic_result: dict[str, Any], *, locale: AppLocale = "es") -> list[dict[str, Any]]:
     source_questions = heuristic_result.get("questions", [])
     if not isinstance(source_questions, list):
         source_questions = []
@@ -322,11 +483,14 @@ def _heuristic_question_items(heuristic_result: dict[str, Any]) -> list[dict[str
             continue
 
         lowered = prompt.lower()
-        if "pequeña" in lowered and "mediana" in lowered and "grande" in lowered:
+        if (
+            ("peque" in lowered and "mediana" in lowered and "grande" in lowered)
+            or ("small" in lowered and "medium" in lowered and "large" in lowered)
+        ):
             fallback_items.append(
                 {
                     "id": "portion_size",
-                    "prompt": "¿Qué tamaño tenía la ración?",
+                    "prompt": "What portion size was it?" if locale == "en" else "¿Qué tamaño tenía la ración?",
                     "answer_type": "single_choice",
                     "options": ["small", "medium", "large"],
                     "placeholder": None,
@@ -334,11 +498,15 @@ def _heuristic_question_items(heuristic_result: dict[str, Any]) -> list[dict[str
             )
             continue
 
-        if "aceite" in lowered or "salsa" in lowered or "mantequilla" in lowered:
+        if any(token in lowered for token in {"aceite", "salsa", "mantequilla", "oil", "sauce", "butter"}):
             fallback_items.append(
                 {
                     "id": "added_fats",
-                    "prompt": "¿Llevaba aceite o salsas añadidas?",
+                    "prompt": (
+                        "Did it include added oil or sauces?"
+                        if locale == "en"
+                        else "¿Llevaba aceite o salsas añadidas?"
+                    ),
                     "answer_type": "single_choice",
                     "options": ["yes", "no"],
                     "placeholder": None,
@@ -346,14 +514,19 @@ def _heuristic_question_items(heuristic_result: dict[str, Any]) -> list[dict[str
             )
             continue
 
-        if "cantidad" in lowered or "cucharada" in lowered or "plato" in lowered:
+        if any(
+            token in lowered
+            for token in {"cantidad", "cucharada", "plato", "quantity", "tbsp", "portion", "plate"}
+        ):
             fallback_items.append(
                 {
                     "id": "quantity_note",
-                    "prompt": "¿Cantidad aproximada? (ej: 1 plato, 2 cucharadas)",
+                    "prompt": "Approximate quantity? (e.g., 1 plate, 2 tablespoons)"
+                    if locale == "en"
+                    else "¿Cantidad aproximada? (ej: 1 plato, 2 cucharadas)",
                     "answer_type": "text",
                     "options": [],
-                    "placeholder": "1 plato / 250 g / 2 cucharadas",
+                    "placeholder": "1 plate / 250 g / 2 tbsp" if locale == "en" else "1 plato / 250 g / 2 cucharadas",
                 }
             )
             continue
@@ -364,7 +537,7 @@ def _heuristic_question_items(heuristic_result: dict[str, Any]) -> list[dict[str
                 "prompt": prompt,
                 "answer_type": "text",
                 "options": [],
-                "placeholder": "Respuesta breve",
+                "placeholder": "Short answer" if locale == "en" else "Respuesta breve",
             }
         )
 
@@ -389,35 +562,57 @@ async def generate_meal_questions_with_ai(
     *,
     api_key: str,
     description: str,
+    quantity_note: str | None = None,
     photo_files: list[UploadFile],
+    locale: AppLocale = "es",
 ) -> dict[str, Any]:
     model_used = MEAL_ESTIMATE_MODEL
     safe_description = (description or "").strip()
+    normalized_locale = _normalize_locale(locale)
 
     heuristic_fallback = estimate_meal(
         description=safe_description,
         portion_size=None,
         has_added_fats=None,
-        quantity_note=None,
+        quantity_note=quantity_note,
         photo_count=len(photo_files),
         adjust_percent=0,
+        locale=normalized_locale,
     )
-    fallback_items = _heuristic_question_items(heuristic_fallback)
+    fallback_items = _heuristic_question_items(heuristic_fallback, locale=normalized_locale)
 
-    system_prompt = (
-        "Eres un asistente de nutrición. Tu tarea es pedir solo la información mínima para "
-        "mejorar la precisión de una estimación "
-        "de comida por foto. Devuelve solo JSON válido."
-    )
-    user_prompt = (
-        "Analiza imagen y descripción. NO estimes macros todavía. "
-        "Devuelve solo preguntas de aclaración (máximo 3, ideal 2). "
-        "Responde exactamente con este JSON: "
-        "{\"questions\":[{\"id\":string,\"prompt\":string,"
-        "\"answer_type\":\"single_choice\"|\"number\"|\"text\",\"options\":[string,...],\"placeholder\":string|null}],"
-        "\"detected_ingredients\":[string,...],\"assumptions\":[string,...]}\n"
-        f"Descripción: {safe_description or '(sin descripción)'}"
-    )
+    if normalized_locale == "en":
+        system_prompt = (
+            "You are a nutrition assistant. Ask only the minimum clarification needed to improve "
+            "meal photo estimation accuracy. Return valid JSON only."
+        )
+        user_prompt = (
+            "Analyze image and description. DO NOT estimate macros yet. "
+            "Return only clarification questions (max 3, ideally 2). "
+            "Answer exactly with this JSON: "
+            "{\"questions\":[{\"id\":string,\"prompt\":string,"
+            "\"answer_type\":\"single_choice\"|\"number\"|\"text\",\"options\":[string,...],\"placeholder\":string|null}],"
+            "\"detected_ingredients\":[string,...],\"assumptions\":[string,...]}\n"
+            f"Description: {safe_description or '(no description)'}\n"
+            f"quantity_note: {quantity_note or '(none)'}\n"
+            "All text fields must be in English."
+        )
+    else:
+        system_prompt = (
+            "Eres un asistente de nutrición. Tu tarea es pedir solo la información mínima para "
+            "mejorar la precisión de una estimación de comida por foto. Devuelve solo JSON válido."
+        )
+        user_prompt = (
+            "Analiza imagen y descripción. NO estimes macros todavía. "
+            "Devuelve solo preguntas de aclaración (máximo 3, ideal 2). "
+            "Responde exactamente con este JSON: "
+            "{\"questions\":[{\"id\":string,\"prompt\":string,"
+            "\"answer_type\":\"single_choice\"|\"number\"|\"text\",\"options\":[string,...],\"placeholder\":string|null}],"
+            "\"detected_ingredients\":[string,...],\"assumptions\":[string,...]}\n"
+            f"Descripción: {safe_description or '(sin descripción)'}\n"
+            f"quantity_note: {quantity_note or '(none)'}\n"
+            "Todos los textos deben estar en español."
+        )
 
     data = await _openai_json_chat(
         api_key=api_key,
@@ -433,19 +628,11 @@ async def generate_meal_questions_with_ai(
     question_items = _coerce_question_items(data.get("questions"))
 
     if not question_items:
-        question_items = fallback_items
+        question_items = list(fallback_items)
+    elif len(question_items) < 2:
+        question_items = [*question_items, *fallback_items]
 
-    if len(question_items) < 2:
-        existing = {str(item.get("prompt", "")).strip().lower() for item in question_items}
-        for fallback in fallback_items:
-            prompt_key = str(fallback.get("prompt", "")).strip().lower()
-            if prompt_key and prompt_key not in existing:
-                question_items.append(fallback)
-                existing.add(prompt_key)
-            if len(question_items) >= 2:
-                break
-
-    question_items = question_items[:3]
+    question_items = _prioritize_question_items(question_items=question_items, fallback_items=fallback_items)
 
     if not assumptions:
         assumptions = [str(item) for item in heuristic_fallback.get("assumptions", [])][:3]
@@ -471,33 +658,57 @@ async def estimate_meal_with_ai(
     photo_files: list[UploadFile],
     adjust_percent: int,
     answers: list[str] | None = None,
+    locale: AppLocale = "es",
 ) -> dict[str, Any]:
     model_used = MEAL_ESTIMATE_MODEL
+    normalized_locale = _normalize_locale(locale)
 
     portion_text = portion_size or "unknown"
     added_fat_text = "unknown" if has_added_fats is None else ("yes" if has_added_fats else "no")
-
-    system_prompt = (
-        "Eres un analista nutricional conservador para estimaciones de platos por foto. "
-        "Devuelve solo JSON válido sin texto extra."
-    )
-
-    user_prompt = (
-        "Estima nutrición de la comida usando imagen y descripción. "
-        "Sé conservador (kcal/grasas/azúcares ligeramente al alza, proteína/fibra ligeramente a la baja). "
-        "Responde estrictamente con este JSON: "
-        "{\"confidence_level\":\"high\"|\"medium\"|\"low\","
-        "\"detected_ingredients\":[string,...],\"assumptions\":[string,...],"
-        "\"questions\":[{\"id\":string,\"prompt\":string,\"answer_type\":\"single_choice\"|\"number\"|\"text\","
-        "\"options\":[string,...],\"placeholder\":string|null}],"
-        "\"nutrition\":{\"kcal\":number,\"protein_g\":number,\"fat_g\":number,\"sat_fat_g\":number|null,"
-        "\"carbs_g\":number,\"sugars_g\":number|null,\"fiber_g\":number|null,\"salt_g\":number|null}}\n"
-        f"Descripción: {description}\n"
-        f"portion_size: {portion_text}\n"
-        f"has_added_fats: {added_fat_text}\n"
-        f"quantity_note: {quantity_note or '(none)'}\n"
-        f"respuestas_usuario: {' | '.join(answers or []) or '(none)'}"
-    )
+    if normalized_locale == "en":
+        system_prompt = (
+            "You are a conservative nutrition analyst for meal photo estimates. "
+            "Return valid JSON only and no extra text."
+        )
+        user_prompt = (
+            "Estimate meal nutrition from image and description. "
+            "Be conservative (kcal/fat/sugars slightly higher, protein/fiber slightly lower). "
+            "Answer strictly with this JSON: "
+            "{\"confidence_level\":\"high\"|\"medium\"|\"low\","
+            "\"detected_ingredients\":[string,...],\"assumptions\":[string,...],"
+            "\"questions\":[{\"id\":string,\"prompt\":string,\"answer_type\":\"single_choice\"|\"number\"|\"text\","
+            "\"options\":[string,...],\"placeholder\":string|null}],"
+            "\"nutrition\":{\"kcal\":number,\"protein_g\":number,\"fat_g\":number,\"sat_fat_g\":number|null,"
+            "\"carbs_g\":number,\"sugars_g\":number|null,\"fiber_g\":number|null,\"salt_g\":number|null}}\n"
+            f"Description: {description}\n"
+            f"portion_size: {portion_text}\n"
+            f"has_added_fats: {added_fat_text}\n"
+            f"quantity_note: {quantity_note or '(none)'}\n"
+            f"user_answers: {' | '.join(answers or []) or '(none)'}\n"
+            "All text fields must be in English."
+        )
+    else:
+        system_prompt = (
+            "Eres un analista nutricional conservador para estimaciones de platos por foto. "
+            "Devuelve solo JSON válido sin texto extra."
+        )
+        user_prompt = (
+            "Estima nutrición de la comida usando imagen y descripción. "
+            "Sé conservador (kcal/grasas/azúcares ligeramente al alza, proteína/fibra ligeramente a la baja). "
+            "Responde estrictamente con este JSON: "
+            "{\"confidence_level\":\"high\"|\"medium\"|\"low\","
+            "\"detected_ingredients\":[string,...],\"assumptions\":[string,...],"
+            "\"questions\":[{\"id\":string,\"prompt\":string,\"answer_type\":\"single_choice\"|\"number\"|\"text\","
+            "\"options\":[string,...],\"placeholder\":string|null}],"
+            "\"nutrition\":{\"kcal\":number,\"protein_g\":number,\"fat_g\":number,\"sat_fat_g\":number|null,"
+            "\"carbs_g\":number,\"sugars_g\":number|null,\"fiber_g\":number|null,\"salt_g\":number|null}}\n"
+            f"Descripción: {description}\n"
+            f"portion_size: {portion_text}\n"
+            f"has_added_fats: {added_fat_text}\n"
+            f"quantity_note: {quantity_note or '(none)'}\n"
+            f"respuestas_usuario: {' | '.join(answers or []) or '(none)'}\n"
+            "Todos los textos deben estar en español."
+        )
 
     data = await _openai_json_chat(
         api_key=api_key,
@@ -517,6 +728,7 @@ async def estimate_meal_with_ai(
         quantity_note=quantity_note,
         photo_count=len(photo_files),
         adjust_percent=0,
+        locale=normalized_locale,
     )
     fallback_nutrition = heuristic_fallback["nutrition"]
 
@@ -549,15 +761,41 @@ async def estimate_meal_with_ai(
             for key, value in conservative.items()
         }
     )
+    nutrition, incoherent_nutrition = _coherence_adjust_nutrition(nutrition)
+    nutrition = sanitize_numeric_values(nutrition)
 
     confidence_level = _normalize_confidence(data.get("confidence_level"))
+    heuristic_confidence = _normalize_confidence(heuristic_fallback.get("confidence_level"))
+    confidence_level = _min_confidence(confidence_level, heuristic_confidence)
+    if incoherent_nutrition:
+        confidence_level = _degrade_confidence(confidence_level, steps=1)
+
+    unknown_answers = _count_unknown_answers(answers)
+    confidence_penalty = 0
+    if len(photo_files) <= 1:
+        confidence_penalty += 1
+    if unknown_answers >= 2:
+        confidence_penalty += 2
+    elif unknown_answers == 1:
+        confidence_penalty += 1
+    if has_added_fats is None:
+        confidence_penalty += 1
+    if not quantity_note:
+        confidence_penalty += 1
+    if _is_ambiguous_meal_description(description):
+        confidence_penalty += 1
+
+    if confidence_penalty >= 4:
+        confidence_level = _degrade_confidence(confidence_level, steps=2)
+    elif confidence_penalty >= 2:
+        confidence_level = _degrade_confidence(confidence_level, steps=1)
 
     assumptions = [str(item).strip() for item in data.get("assumptions", []) if str(item).strip()]
     question_items = _coerce_question_items(data.get("questions"))
     questions = _questions_plain(question_items)
     ingredients = [str(item).strip() for item in data.get("detected_ingredients", []) if str(item).strip()]
 
-    fallback_items = _heuristic_question_items(heuristic_fallback)
+    fallback_items = _heuristic_question_items(heuristic_fallback, locale=normalized_locale)
 
     if not assumptions:
         assumptions = [str(item) for item in heuristic_fallback["assumptions"]]
@@ -566,6 +804,9 @@ async def estimate_meal_with_ai(
         questions = _questions_plain(question_items)
     if not ingredients:
         ingredients = [str(item) for item in heuristic_fallback["detected_ingredients"]]
+
+    question_items = _prioritize_question_items(question_items=question_items, fallback_items=fallback_items)
+    questions = _questions_plain(question_items)
 
     return {
         "model_used": model_used,
