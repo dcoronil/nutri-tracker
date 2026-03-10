@@ -7,7 +7,9 @@
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "web:build": "expo export --platform web --output-dir dist",
+    "web:serve": "serve dist -l 8080"
   },
   "dependencies": {
     "@react-native-community/datetimepicker": "8.4.4",
@@ -23,10 +25,13 @@
     "expo-status-bar": "~3.0.9",
     "react": "19.1.0",
     "react-native": "0.81.5",
+    "react-dom": "19.1.0",
+    "react-native-web": "~0.21.0",
     "react-native-svg": "15.12.1"
   },
   "devDependencies": {
     "@types/react": "~19.1.10",
+    "serve": "^14.2.4",
     "typescript": "~5.9.2"
   }
 }

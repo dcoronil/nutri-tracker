@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import * as SecureStore from "expo-secure-store";
+import { getItem as getStoredItem, setItem as setStoredItem } from "../platform/storage";
 
 import { enTranslations } from "./locales/en";
 import { esOverrides } from "./locales/es";
@@ -57,7 +57,7 @@ export function I18nProvider({ children }: { children: import("react").ReactNode
   useEffect(() => {
     void (async () => {
       try {
-        const stored = await SecureStore.getItemAsync(LANGUAGE_STORAGE_KEY);
+        const stored = await getStoredItem(LANGUAGE_STORAGE_KEY);
         if (stored === "es" || stored === "en") {
           setLanguageState(stored);
         }
@@ -71,7 +71,7 @@ export function I18nProvider({ children }: { children: import("react").ReactNode
     setLanguageState(nextLanguage);
     runtimeLanguage = nextLanguage;
     try {
-      await SecureStore.setItemAsync(LANGUAGE_STORAGE_KEY, nextLanguage);
+      await setStoredItem(LANGUAGE_STORAGE_KEY, nextLanguage);
     } catch {
       // no-op: language still applies in-memory
     }

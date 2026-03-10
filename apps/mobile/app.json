@@ -6,9 +6,14 @@
     "orientation": "portrait",
     "platforms": [
       "ios",
-      "android"
+      "android",
+      "web"
     ],
     "userInterfaceStyle": "dark",
+    "web": {
+      "bundler": "metro",
+      "output": "single"
+    },
     "plugins": [
       "expo-asset",
       "@react-native-community/datetimepicker"

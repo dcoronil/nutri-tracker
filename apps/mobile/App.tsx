@@ -17,21 +17,24 @@ import {
   TextInput as RNTextInput,
   type TextInputProps,
   type TextProps,
+  type ViewStyle,
+  useWindowDimensions,
   Vibration,
   View,
 } from "react-native";
 import Slider from "@react-native-community/slider";
 import DateTimePicker, { DateTimePickerEvent } from "@react-native-community/datetimepicker";
-import { BarcodeScanningResult, CameraView, useCameraPermissions } from "expo-camera";
+import { BarcodeScanningResult, CameraView, type BarcodeType, scanFromURLAsync, useCameraPermissions } from "expo-camera";
 import Constants from "expo-constants";
 import * as ImageManipulator from "expo-image-manipulator";
 import * as ImagePicker from "expo-image-picker";
-import * as SecureStore from "expo-secure-store";
 import { StatusBar } from "expo-status-bar";
 import Svg, { Circle, G, Line, Path, Rect, SvgXml } from "react-native-svg";
 
 import { BodyAvatarSvg } from "./components/BodyAvatarSvg";
 import { I18nProvider, tGlobal, useI18n } from "./src/i18n";
+import { deleteItem as deleteStoredItem, getItem as getStoredItem, setItem as setStoredItem } from "./src/platform/storage";
+import { themeForPlatform } from "./src/theme/colors";
 
 type NutritionBasis = "per_100g" | "per_100ml" | "per_serving";
 type LookupSource = "local" | "openfoodfacts_imported" | "openfoodfacts_incomplete" | "not_found";
@@ -580,28 +583,7 @@ const MAX_MEAL_PHOTOS = 3;
 const DEV_SETTINGS_MODE = (process.env.EXPO_PUBLIC_DEV_SETTINGS ?? "false").toLowerCase() === "true";
 const STREAK_FLAME_SVG_XML =
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 92.27 122.88"><g><path fill="#EC6F59" fill-rule="evenodd" clip-rule="evenodd" d="M18.61,54.89C15.7,28.8,30.94,10.45,59.52,0C42.02,22.71,74.44,47.31,76.23,70.89c4.19-7.15,6.57-16.69,7.04-29.45c21.43,33.62,3.66,88.57-43.5,80.67c-4.33-0.72-8.5-2.09-12.3-4.13C10.27,108.8,0,88.79,0,69.68C0,57.5,5.21,46.63,11.95,37.99C12.85,46.45,14.77,52.76,18.61,54.89L18.61,54.89z"/><path fill="#FAD15C" fill-rule="evenodd" clip-rule="evenodd" d="M33.87,92.58c-4.86-12.55-4.19-32.82,9.42-39.93c0.1,23.3,23.05,26.27,18.8,51.14c3.92-4.44,5.9-11.54,6.25-17.15c6.22,14.24,1.34,25.63-7.53,31.43c-26.97,17.64-50.19-18.12-34.75-37.72C26.53,84.73,31.89,91.49,33.87,92.58L33.87,92.58z"/></g></svg>';
-const theme = {
-  bg: "#050505",
-  bgElevated: "#0c0c0c",
-  panel: "#121212",
-  panelSoft: "#181818",
-  panelMuted: "#1f1f1f",
-  border: "#2a2a2a",
-  text: "#f5f5f5",
-  muted: "#a3a3a3",
-  accent: "#ffffff",
-  accentSoft: "#262626",
-  danger: "#f48f8f",
-  warning: "#f1d08e",
-  ok: "#a9d8bb",
-  protein: "#4f8dfd",
-  carbs: "#f59e0b",
-  fats: "#f472b6",
-  kcal: "#2ed9c3",
-  blue: "#b8b8b8",
-  yellow: "#dcdcdc",
-  red: "#f48f8f",
-};
+const theme = themeForPlatform(Platform.OS);
 
 const authContext = createContext<AuthContextValue | undefined>(undefined);
 
@@ -645,8 +627,16 @@ function getExpoHostIp(): string | null {
 
 function inferApiBaseUrl(): string {
   const envUrl = normalizeBaseUrl(process.env.EXPO_PUBLIC_API_BASE_URL ?? "");
-  if (envUrl && !envUrl.includes("localhost")) {
+  if (envUrl) {
     return envUrl;
+  }
+
+  if (Platform.OS === "web" && typeof window !== "undefined") {
+    const host = window.location.hostname;
+    if (host && host !== "localhost" && host !== "127.0.0.1") {
+      return `http://${host}:8000`;
+    }
+    return "http://localhost:8000";
   }
 
   const hostIp = getExpoHostIp();
@@ -659,6 +649,154 @@ function inferApiBaseUrl(): string {
   }
 
   return envUrl || "http://localhost:8000";
+}
+
+type WebBreakpoint = "mobile" | "tablet" | "desktop";
+const WEB_TOPBAR_HEIGHT = 60;
+const WEB_NAVBAR_HEIGHT = 52;
+const WEB_CHROME_TOTAL_HEIGHT = WEB_TOPBAR_HEIGHT + WEB_NAVBAR_HEIGHT;
+const BARCODE_TYPES: BarcodeType[] = ["ean13", "ean8", "upc_a", "upc_e"];
+
+function webBreakpoint(width: number): WebBreakpoint {
+  if (Platform.OS !== "web") {
+    return "mobile";
+  }
+  if (width >= 1024) {
+    return "desktop";
+  }
+  if (width >= 768) {
+    return "tablet";
+  }
+  return "mobile";
+}
+
+function isWideDesktopWebLayout(width: number): boolean {
+  return Platform.OS === "web" && width >= 1280;
+}
+
+function isDesktopWebLayout(width: number): boolean {
+  return webBreakpoint(width) === "desktop";
+}
+
+function webMainContentContainerStyle(width: number): ViewStyle | undefined {
+  if (Platform.OS !== "web") {
+    return undefined;
+  }
+
+  if (width >= 1280) {
+    return {
+      width: "100%",
+      alignSelf: "center",
+      maxWidth: 1400,
+      paddingHorizontal: 36,
+      paddingBottom: 128,
+    };
+  }
+
+  if (width >= 1024) {
+    return {
+      width: "100%",
+      alignSelf: "center",
+      maxWidth: 1320,
+      paddingHorizontal: 30,
+      paddingBottom: 118,
+    };
+  }
+
+  if (width >= 768) {
+    return {
+      width: "100%",
+      alignSelf: "center",
+      maxWidth: 1180,
+      paddingHorizontal: 24,
+      paddingBottom: 108,
+    };
+  }
+
+  return undefined;
+}
+
+function webScanContainerStyle(width: number): ViewStyle | undefined {
+  if (Platform.OS !== "web") {
+    return undefined;
+  }
+
+  if (width >= 1280) {
+    return {
+      width: "100%",
+      alignSelf: "center",
+      maxWidth: 1400,
+      paddingHorizontal: 36,
+    };
+  }
+  if (width >= 1024) {
+    return {
+      width: "100%",
+      alignSelf: "center",
+      maxWidth: 1320,
+      paddingHorizontal: 30,
+    };
+  }
+  if (width >= 768) {
+    return {
+      width: "100%",
+      alignSelf: "center",
+      maxWidth: 1180,
+      paddingHorizontal: 24,
+    };
+  }
+  return undefined;
+}
+
+function webScanFrameStyle(width: number): ViewStyle | undefined {
+  if (Platform.OS !== "web") {
+    return undefined;
+  }
+  if (width >= 1280) {
+    return {
+      width: "48%",
+      maxWidth: 560,
+      minWidth: 420,
+      height: 180,
+      borderRadius: 20,
+    };
+  }
+  if (width >= 1024) {
+    return {
+      width: "54%",
+      maxWidth: 520,
+      minWidth: 360,
+      height: 172,
+      borderRadius: 18,
+    };
+  }
+  if (width >= 768) {
+    return {
+      width: "66%",
+      maxWidth: 500,
+      minWidth: 320,
+      height: 164,
+      borderRadius: 16,
+    };
+  }
+  return undefined;
+}
+
+function webContentSideInset(width: number): number {
+  if (Platform.OS !== "web") {
+    return 16;
+  }
+
+  if (width >= 1280) {
+    return Math.max(0, (width - 1400) / 2) + 36;
+  }
+  if (width >= 1024) {
+    return Math.max(0, (width - 1320) / 2) + 30;
+  }
+  if (width >= 768) {
+    return Math.max(0, (width - 1180) / 2) + 24;
+  }
+  return 18;
 }
 
 function parseApiError(error: unknown): string {
@@ -694,6 +832,9 @@ function parseApiError(error: unknown): string {
   }
   if (message.includes("String should have at least")) {
     return "Hay campos con menos caracteres de los requeridos.";
+  }
+  if (message.trim() === "Not Found" || message.includes("404")) {
+    return "Endpoint no encontrado. Revisa la API base URL en Ajustes.";
   }
 
   return message;
@@ -764,6 +905,32 @@ function parseBirthDateInput(value: string): Date | null {
     return null;
   }
   return result;
+}
+
+function passwordStrengthMeta(password: string): {
+  score: number;
+  label: string;
+  color: string;
+} {
+  if (!password) {
+    return { score: 0, label: "Sin evaluar", color: theme.muted };
+  }
+
+  let score = 0;
+  if (password.length >= 8) score += 1;
+  if (/[a-z]/.test(password)) score += 1;
+  if (/[A-Z]/.test(password)) score += 1;
+  if (/\d/.test(password)) score += 1;
+  if (/[^A-Za-z0-9]/.test(password)) score += 1;
+  if (password.length >= 12) score += 1;
+
+  if (score <= 2) {
+    return { score, label: "Poco segura", color: theme.red };
+  }
+  if (score <= 4) {
+    return { score, label: "Mejorable", color: theme.yellow };
+  }
+  return { score, label: "Segura", color: theme.ok };
 }
 
 function ageFromBirthDateString(birthDate: string | null | undefined, now = new Date()): number | null {
@@ -1087,7 +1254,7 @@ function AuthProvider({ children }: { children: import("react").ReactNode }) {
   const boot = useCallback(async () => {
     setLoading(true);
     try {
-      const storedToken = await SecureStore.getItemAsync(TOKEN_STORAGE_KEY);
+      const storedToken = await getStoredItem(TOKEN_STORAGE_KEY);
       if (!storedToken) {
         setToken(null);
         setUser(null);
@@ -1100,7 +1267,7 @@ function AuthProvider({ children }: { children: import("react").ReactNode }) {
       setUser(me.user);
       setProfile(me.profile);
     } catch {
-      await SecureStore.deleteItemAsync(TOKEN_STORAGE_KEY);
+      await deleteStoredItem(TOKEN_STORAGE_KEY);
       setToken(null);
       setUser(null);
       setProfile(null);
@@ -1118,7 +1285,7 @@ function AuthProvider({ children }: { children: import("react").ReactNode }) {
     setUser(response.user);
     setProfile(response.profile);
     setPendingVerificationEmail(null);
-    await SecureStore.setItemAsync(TOKEN_STORAGE_KEY, response.access_token);
+    await setStoredItem(TOKEN_STORAGE_KEY, response.access_token);
   }, []);
 
   const register = useCallback(
@@ -1134,7 +1301,7 @@ function AuthProvider({ children }: { children: import("react").ReactNode }) {
       setUser(null);
       setProfile(null);
       setToken(null);
-      await SecureStore.deleteItemAsync(TOKEN_STORAGE_KEY);
+      await deleteStoredItem(TOKEN_STORAGE_KEY);
       return response;
     },
     [request],
@@ -1195,7 +1362,7 @@ function AuthProvider({ children }: { children: import("react").ReactNode }) {
   }, []);
 
   const logout = useCallback(async () => {
-    await SecureStore.deleteItemAsync(TOKEN_STORAGE_KEY);
+    await deleteStoredItem(TOKEN_STORAGE_KEY);
     setToken(null);
     setUser(null);
     setProfile(null);
@@ -2036,6 +2203,11 @@ function AppHeader({
   onRightAction?: () => void;
   rightActionDisabled?: boolean;
 }) {
+  const { width } = useWindowDimensions();
+  const breakpoint = webBreakpoint(width);
+  const isWebDesktop = breakpoint === "desktop";
+  const isWebTablet = breakpoint === "tablet";
+
   return (
     <View style={styles.headerWrap}>
       <View style={styles.headerTopRow}>
@@ -2058,8 +2230,12 @@ function AppHeader({
           <View style={styles.headerTopSpacer} />
         )}
       </View>
-      <Text style={styles.headerTitle}>{title}</Text>
-      {subtitle ? <Text style={styles.headerSubtitle}>{subtitle}</Text> : null}
+      <Text style={[styles.headerTitle, isWebTablet && styles.headerTitleTablet, isWebDesktop && styles.headerTitleDesktop]}>{title}</Text>
+      {subtitle ? (
+        <Text style={[styles.headerSubtitle, isWebTablet && styles.headerSubtitleTablet, isWebDesktop && styles.headerSubtitleDesktop]}>
+          {subtitle}
+        </Text>
+      ) : null}
     </View>
   );
 }
@@ -2073,6 +2249,7 @@ function InputField(props: {
   autoCapitalize?: "none" | "sentences" | "words" | "characters";
   placeholder?: string;
 }) {
+  const [focused, setFocused] = useState(false);
   return (
     <View style={styles.fieldWrap}>
       <Text style={styles.fieldLabel}>{props.label}</Text>
@@ -2083,8 +2260,10 @@ function InputField(props: {
         secureTextEntry={props.secureTextEntry}
         autoCapitalize={props.autoCapitalize ?? "none"}
         placeholder={props.placeholder}
-        placeholderTextColor={theme.muted}
-        style={styles.input}
+        placeholderTextColor={theme.placeholder}
+        style={[styles.input, focused && styles.inputFocused]}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
       />
     </View>
   );
@@ -2102,24 +2281,56 @@ function ReadOnlyField(props: { label: string; value: string }) {
 }
 
 function PrimaryButton(props: { title: string; onPress: () => void; loading?: boolean; disabled?: boolean }) {
+  const [hovered, setHovered] = useState(false);
   const disabled = props.disabled || props.loading;
   return (
-    <Pressable onPress={props.onPress} disabled={disabled} style={[styles.primaryButton, disabled && styles.disabledButton]}>
+    <Pressable
+      onPress={props.onPress}
+      disabled={disabled}
+      onHoverIn={() => setHovered(true)}
+      onHoverOut={() => setHovered(false)}
+      style={({ pressed }) => [
+        styles.primaryButton,
+        hovered && !disabled && styles.primaryButtonHover,
+        pressed && !disabled && styles.primaryButtonPressed,
+        disabled && styles.disabledButton,
+      ]}
+    >
       {props.loading ? <ActivityIndicator color={theme.bg} /> : <Text style={styles.primaryButtonText}>{props.title}</Text>}
     </Pressable>
   );
 }
 
 function SecondaryButton(props: { title: string; onPress: () => void; disabled?: boolean }) {
+  const [hovered, setHovered] = useState(false);
   return (
-    <Pressable onPress={props.onPress} disabled={props.disabled} style={[styles.secondaryButton, props.disabled && styles.disabledButton]}>
+    <Pressable
+      onPress={props.onPress}
+      disabled={props.disabled}
+      onHoverIn={() => setHovered(true)}
+      onHoverOut={() => setHovered(false)}
+      style={({ pressed }) => [
+        styles.secondaryButton,
+        hovered && !props.disabled && styles.secondaryButtonHover,
+        pressed && !props.disabled && styles.secondaryButtonPressed,
+        props.disabled && styles.disabledButton,
+      ]}
+    >
       <Text style={styles.secondaryButtonText}>{props.title}</Text>
     </Pressable>
   );
 }
 
 function AppCard(props: { children: import("react").ReactNode; style?: object }) {
-  return <View style={[styles.appCard, props.style]}>{props.children}</View>;
+  const { width } = useWindowDimensions();
+  const breakpoint = webBreakpoint(width);
+  const cardResponsiveStyle =
+    breakpoint === "desktop"
+      ? styles.appCardDesktop
+      : breakpoint === "tablet"
+        ? styles.appCardTablet
+        : undefined;
+  return <View style={[styles.appCard, cardResponsiveStyle, props.style]}>{props.children}</View>;
 }
 
 function SectionHeader(props: {
@@ -2128,11 +2339,34 @@ function SectionHeader(props: {
   actionLabel?: string;
   onAction?: () => void;
 }) {
+  const { width } = useWindowDimensions();
+  const breakpoint = webBreakpoint(width);
+  const isWebDesktop = breakpoint === "desktop";
+  const isWebTablet = breakpoint === "tablet";
+
   return (
     <View style={styles.sectionHeaderWrap}>
       <View style={styles.sectionHeaderLeft}>
-        <Text style={styles.sectionHeaderTitle}>{props.title}</Text>
-        {props.subtitle ? <Text style={styles.sectionHeaderSubtitle}>{props.subtitle}</Text> : null}
+        <Text
+          style={[
+            styles.sectionHeaderTitle,
+            isWebTablet && styles.sectionHeaderTitleTablet,
+            isWebDesktop && styles.sectionHeaderTitleDesktop,
+          ]}
+        >
+          {props.title}
+        </Text>
+        {props.subtitle ? (
+          <Text
+            style={[
+              styles.sectionHeaderSubtitle,
+              isWebTablet && styles.sectionHeaderSubtitleTablet,
+              isWebDesktop && styles.sectionHeaderSubtitleDesktop,
+            ]}
+          >
+            {props.subtitle}
+          </Text>
+        ) : null}
       </View>
       {props.actionLabel && props.onAction ? (
         <Pressable style={styles.sectionHeaderAction} onPress={props.onAction}>
@@ -2213,11 +2447,31 @@ function ToastFeedback(props: { kind: "success" | "error"; message: string }) {
 }
 
 function MetricCard(props: { label: string; value: string; subtitle?: string; color?: string }) {
+  const { width } = useWindowDimensions();
+  const breakpoint = webBreakpoint(width);
+  const isWebDesktop = breakpoint === "desktop";
+  const isWebTablet = breakpoint === "tablet";
+
   return (
-    <View style={styles.metricTile}>
-      <Text style={styles.metricTileLabel}>{props.label}</Text>
-      <Text style={[styles.metricTileValue, props.color ? { color: props.color } : null]}>{props.value}</Text>
-      {props.subtitle ? <Text style={styles.metricTileSubtitle}>{props.subtitle}</Text> : null}
+    <View style={[styles.metricTile, isWebTablet && styles.metricTileTablet, isWebDesktop && styles.metricTileDesktop]}>
+      <Text style={[styles.metricTileLabel, isWebTablet && styles.metricTileLabelTablet, isWebDesktop && styles.metricTileLabelDesktop]}>
+        {props.label}
+      </Text>
+      <Text
+        style={[
+          styles.metricTileValue,
+          isWebTablet && styles.metricTileValueTablet,
+          isWebDesktop && styles.metricTileValueDesktop,
+          props.color ? { color: props.color } : null,
+        ]}
+      >
+        {props.value}
+      </Text>
+      {props.subtitle ? (
+        <Text style={[styles.metricTileSubtitle, isWebTablet && styles.metricTileSubtitleTablet, isWebDesktop && styles.metricTileSubtitleDesktop]}>
+          {props.subtitle}
+        </Text>
+      ) : null}
     </View>
   );
 }
@@ -2305,11 +2559,13 @@ function WelcomeScreen({ onCreate, onLogin }: { onCreate: () => void; onLogin: (
 
 function SignupScreen({ onBack }: { onBack: () => void }) {
   const auth = useAuth();
+  const isWeb = Platform.OS === "web";
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [birthDate, setBirthDate] = useState<Date>(new Date(2000, 0, 1));
+  const [birthDateInput, setBirthDateInput] = useState("2000-01-01");
   const [sex, setSex] = useState<Sex>("other");
   const [showBirthDatePicker, setShowBirthDatePicker] = useState(false);
   const [usernameStatus, setUsernameStatus] = useState<{
@@ -2323,6 +2579,11 @@ function SignupScreen({ onBack }: { onBack: () => void }) {
   const usernameAlertedRef = useRef<string | null>(null);
   const [loading, setLoading] = useState(false);
   const birthDateValue = formatDateForApi(birthDate);
+  const strength = useMemo(() => passwordStrengthMeta(password), [password]);
+
+  useEffect(() => {
+    setBirthDateInput(birthDateValue);
+  }, [birthDateValue]);
 
   useEffect(() => {
     const normalizedUsername = username.trim().toLowerCase();
@@ -2423,7 +2684,14 @@ function SignupScreen({ onBack }: { onBack: () => void }) {
       showAlert("Usuario", usernameStatus.message || "Ese nombre de usuario no está disponible.");
       return;
     }
-    const age = ageFromBirthDateString(birthDateValue);
+    const effectiveBirthDate = (isWeb ? birthDateInput.trim() : birthDateValue) || birthDateValue;
+    const parsedBirthDate = parseBirthDateInput(effectiveBirthDate);
+    if (!parsedBirthDate) {
+      showAlert("Fecha de nacimiento", "Usa formato YYYY-MM-DD.");
+      return;
+    }
+
+    const age = ageFromBirthDateString(effectiveBirthDate);
     if (age === null || age < 13) {
       showAlert("Fecha de nacimiento", "Debes tener al menos 13 años.");
       return;
@@ -2436,11 +2704,16 @@ function SignupScreen({ onBack }: { onBack: () => void }) {
         email: email.trim().toLowerCase(),
         password,
         sex,
-        birth_date: birthDateValue,
+        birth_date: effectiveBirthDate,
       });
       showAlert("Cuenta creada", response.message);
     } catch (error) {
-      showAlert("Registro", parseApiError(error));
+      const message = parseApiError(error);
+      if (message.includes("Endpoint no encontrado")) {
+        showAlert("Registro", `${message}\nURL API activa: ${auth.apiBaseUrl}`);
+      } else {
+        showAlert("Registro", message);
+      }
     } finally {
       setLoading(false);
     }
@@ -2480,6 +2753,17 @@ function SignupScreen({ onBack }: { onBack: () => void }) {
           ) : null}
           <InputField label="Email" value={email} onChangeText={setEmail} keyboardType="email-address" />
           <InputField label="Contraseña" value={password} onChangeText={setPassword} secureTextEntry />
+          {password ? (
+            <View style={styles.passwordStrengthWrap}>
+              <View style={styles.passwordStrengthHeader}>
+                <Text style={styles.helperText}>Seguridad de contraseña</Text>
+                <Text style={[styles.passwordStrengthLabel, { color: strength.color }]}>{strength.label}</Text>
+              </View>
+              <View style={styles.passwordStrengthTrack}>
+                <View style={[styles.passwordStrengthFill, { width: `${Math.min(100, (strength.score / 6) * 100)}%`, backgroundColor: strength.color }]} />
+              </View>
+            </View>
+          ) : null}
           <InputField label="Confirmar contraseña" value={confirmPassword} onChangeText={setConfirmPassword} secureTextEntry />
           <ChoiceRow
             label="Sexo"
@@ -2491,24 +2775,49 @@ function SignupScreen({ onBack }: { onBack: () => void }) {
               { label: "Otro", value: "other" },
             ]}
           />
-          <View style={styles.fieldWrap}>
-            <Text style={styles.fieldLabel}>Fecha de nacimiento</Text>
-            <Pressable style={styles.dateFieldButton} onPress={() => setShowBirthDatePicker(true)}>
-              <Text style={styles.dateFieldButtonText}>{birthDateValue}</Text>
-            </Pressable>
-          </View>
-          {showBirthDatePicker ? (
-            <View style={styles.birthDatePickerWrap}>
-              <DateTimePicker
-                value={birthDate}
-                mode="date"
-                display={Platform.OS === "ios" ? "spinner" : "default"}
-                maximumDate={new Date()}
-                onChange={onBirthDateChange}
-              />
-              {Platform.OS === "ios" ? <SecondaryButton title="Listo" onPress={() => setShowBirthDatePicker(false)} /> : null}
+          {isWeb ? (
+            <View style={styles.fieldWrap}>
+              <Text style={styles.fieldLabel}>Fecha de nacimiento</Text>
+              <View style={styles.webDateFieldWrap}>
+                <RNTextInput
+                  value={birthDateInput}
+                  onChangeText={(value) => {
+                    setBirthDateInput(value);
+                    const parsed = parseBirthDateInput(value);
+                    if (parsed) {
+                      setBirthDate(new Date(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate()));
+                    }
+                  }}
+                  placeholder="YYYY-MM-DD"
+                  placeholderTextColor={theme.placeholder}
+                  style={styles.webDateNativeInput}
+                  autoCapitalize="none"
+                  {...({ type: "date", max: formatDateForApi(new Date()) } as unknown as TextInputProps)}
+                />
+              </View>
             </View>
-          ) : null}
+          ) : (
+            <>
+              <View style={styles.fieldWrap}>
+                <Text style={styles.fieldLabel}>Fecha de nacimiento</Text>
+                <Pressable style={styles.dateFieldButton} onPress={() => setShowBirthDatePicker(true)}>
+                  <Text style={styles.dateFieldButtonText}>{birthDateValue}</Text>
+                </Pressable>
+              </View>
+              {showBirthDatePicker ? (
+                <View style={styles.birthDatePickerWrap}>
+                  <DateTimePicker
+                    value={birthDate}
+                    mode="date"
+                    display={Platform.OS === "ios" ? "spinner" : "default"}
+                    maximumDate={new Date()}
+                    onChange={onBirthDateChange}
+                  />
+                  {Platform.OS === "ios" ? <SecondaryButton title="Listo" onPress={() => setShowBirthDatePicker(false)} /> : null}
+                </View>
+              ) : null}
+            </>
+          )}
 
           <PrimaryButton title="Crear cuenta" onPress={submit} loading={loading} disabled={isSubmitDisabled} />
           <SecondaryButton title="Volver" onPress={onBack} />
@@ -2534,7 +2843,12 @@ function LoginScreen({ onBack }: { onBack: () => void }) {
     try {
       await auth.login({ email: email.trim().toLowerCase(), password });
     } catch (error) {
-      showAlert("Login", parseApiError(error));
+      const message = parseApiError(error);
+      if (message.includes("Endpoint no encontrado")) {
+        showAlert("Login", `${message}\nURL API activa: ${auth.apiBaseUrl}`);
+      } else {
+        showAlert("Login", message);
+      }
     } finally {
       setLoading(false);
     }
@@ -2975,16 +3289,18 @@ function RingProgress(props: {
   goal: number;
   color: string;
   unit: string;
+  variant?: "default" | "hero";
 }) {
-  const size = 116;
-  const stroke = 10;
+  const isHero = props.variant === "hero";
+  const size = isHero ? 150 : 116;
+  const stroke = isHero ? 12 : 10;
   const radius = (size - stroke) / 2;
   const circle = 2 * Math.PI * radius;
   const safeGoal = props.goal > 0 ? props.goal : 1;
   const progress = clamp(props.consumed / safeGoal, 0, 1);
 
   return (
-    <View style={styles.ringCard}>
+    <View style={[styles.ringCard, isHero && styles.ringCardHero]}>
       <Svg width={size} height={size}>
         <G rotation={-90} origin={`${size / 2}, ${size / 2}`}>
           <Circle cx={size / 2} cy={size / 2} r={radius} stroke={theme.border} strokeWidth={stroke} fill="transparent" />
@@ -3000,10 +3316,10 @@ function RingProgress(props: {
           />
         </G>
       </Svg>
-      <View style={styles.ringCenter}>
-        <Text style={styles.ringLabel}>{props.label}</Text>
-        <Text style={styles.ringValue}>{Math.round(props.consumed)}</Text>
-        <Text style={styles.ringUnit}>{props.unit}</Text>
+      <View style={[styles.ringCenter, isHero && styles.ringCenterHero]}>
+        <Text style={[styles.ringLabel, isHero && styles.ringLabelHero]}>{props.label}</Text>
+        <Text style={[styles.ringValue, isHero && styles.ringValueHero]}>{Math.round(props.consumed)}</Text>
+        <Text style={[styles.ringUnit, isHero && styles.ringUnitHero]}>{props.unit}</Text>
       </View>
     </View>
   );
@@ -3072,7 +3388,7 @@ function AddQuantityMacroSummary(props: { kcal: number; protein: number; carbs: 
   const segments: Segment[] = [
     { label: "Carbohidratos", value: Math.max(props.carbs, 0), color: theme.carbs },
     { label: "Grasas", value: Math.max(props.fats, 0), color: theme.fats },
-    { label: "Proteínas", value: Math.max(props.protein, 0), color: theme.kcal },
+    { label: "Proteínas", value: Math.max(props.protein, 0), color: theme.protein },
   ];
   const total = Math.max(segments.reduce((acc, item) => acc + item.value, 0), 0.0001);
   let offset = 0;
@@ -3156,7 +3472,13 @@ function DashboardScreen({
 }: {
   onOpenBodyProgress: () => void;
 }) {
+  const { width } = useWindowDimensions();
   const auth = useAuth();
+  const breakpoint = webBreakpoint(width);
+  const isWeb = Platform.OS === "web";
+  const useDesktopLayout = isDesktopWebLayout(width);
+  const useWideDesktopLayout = isWideDesktopWebLayout(width);
+  const webMainScrollStyle = useMemo(() => webMainContentContainerStyle(width), [width]);
   const selectedDate = useMemo(() => formatDateLocal(new Date()), []);
   const [macroViewMode, setMacroViewMode] = useState<"rings" | "bars">("rings");
   const [summary, setSummary] = useState<DaySummary | null>(null);
@@ -3304,10 +3626,210 @@ function DashboardScreen({
     ]);
   };
 
+  const heroSummaryCard = (
+    <AppCard style={[styles.heroCard, exceededKcal && styles.heroCardExceeded, useDesktopLayout && styles.dashboardHeroDesktop]}>
+      <SectionHeader title="Resumen del día" subtitle="Kcal restantes" />
+      <Text
+        style={[
+          styles.heroRemainingValue,
+          breakpoint === "tablet" && styles.heroRemainingValueTablet,
+          breakpoint === "desktop" && styles.heroRemainingValueDesktop,
+        ]}
+      >
+        {kcalGoal > 0 ? kcalRemaining : "-"}
+      </Text>
+      <Text style={styles.heroRemainingSub}>
+        {Math.round(kcalConsumed)} consumidas / {Math.round(kcalGoal)} objetivo
+      </Text>
+      <View style={styles.heroProgressTrack}>
+        <View
+          style={[
+            styles.heroProgressFill,
+            { width: `${kcalProgress * 100}%`, backgroundColor: exceededKcal ? theme.danger : theme.kcal },
+          ]}
+        />
+      </View>
+      <View style={styles.heroPillsRow}>
+        <TagChip label={exceededKcal ? "Sobre objetivo" : "En rango"} tone={exceededKcal ? "danger" : "accent"} />
+        <TagChip
+          label={
+            (summary?.intakes.length ?? 0) === 1
+              ? tx("{{count}} registro", { count: summary?.intakes.length ?? 0 })
+              : tx("{{count}} registros", { count: summary?.intakes.length ?? 0 })
+          }
+          tone={summary?.intakes.length ? "default" : "warning"}
+        />
+      </View>
+    </AppCard>
+  );
+
+  const bodyTrackingCard = (
+    <AppCard>
+      <SectionHeader title="Seguimiento corporal" subtitle="Estado actual" actionLabel="Registrar peso" onAction={onOpenBodyProgress} />
+      <View style={styles.metricTileRow}>
+        <MetricCard label="Peso" value={auth.profile ? `${auth.profile.weight_kg} kg` : "-"} />
+        <MetricCard label="IMC" value={auth.profile?.bmi ? auth.profile.bmi.toFixed(1) : "-"} />
+        <MetricCard label="% grasa" value={auth.profile?.body_fat_percent ? `${auth.profile.body_fat_percent.toFixed(1)}%` : "N/D"} />
+      </View>
+      <Text style={styles.helperText}>Próximo paso: tendencia semanal de peso y cambio vs semana anterior.</Text>
+    </AppCard>
+  );
+
+  const macroDayCard = (
+    <AppCard>
+      <SectionHeader title="Macros del día" subtitle="Vista rápida" />
+      <View style={styles.macroToggleRow}>
+        <Pressable style={[styles.macroToggleChip, macroViewMode === "rings" && styles.macroToggleChipActive]} onPress={() => setMacroViewMode("rings")}>
+          <Text style={[styles.macroToggleText, macroViewMode === "rings" && styles.macroToggleTextActive]}>Aros</Text>
+        </Pressable>
+        <Pressable style={[styles.macroToggleChip, macroViewMode === "bars" && styles.macroToggleChipActive]} onPress={() => setMacroViewMode("bars")}>
+          <Text style={[styles.macroToggleText, macroViewMode === "bars" && styles.macroToggleTextActive]}>Barras</Text>
+        </Pressable>
+      </View>
+
+      {macroViewMode === "rings" ? (
+        <View style={useDesktopLayout ? styles.dashboardRingsShowcaseGrid : styles.rowWrap}>
+          <RingProgress
+            variant={useDesktopLayout ? "hero" : "default"}
+            label="kcal"
+            consumed={summary?.consumed.kcal ?? 0}
+            goal={summary?.goal?.kcal_goal ?? Math.max(summary?.consumed.kcal ?? 0, 1)}
+            color={theme.kcal}
+            unit="kcal"
+          />
+          <RingProgress
+            variant={useDesktopLayout ? "hero" : "default"}
+            label="prote"
+            consumed={summary?.consumed.protein_g ?? 0}
+            goal={summary?.goal?.protein_goal ?? Math.max(summary?.consumed.protein_g ?? 0, 1)}
+            color={theme.protein}
+            unit="g"
+          />
+          <RingProgress
+            variant={useDesktopLayout ? "hero" : "default"}
+            label="carbs"
+            consumed={summary?.consumed.carbs_g ?? 0}
+            goal={summary?.goal?.carbs_goal ?? Math.max(summary?.consumed.carbs_g ?? 0, 1)}
+            color={theme.carbs}
+            unit="g"
+          />
+          <RingProgress
+            variant={useDesktopLayout ? "hero" : "default"}
+            label="grasas"
+            consumed={summary?.consumed.fat_g ?? 0}
+            goal={summary?.goal?.fat_goal ?? Math.max(summary?.consumed.fat_g ?? 0, 1)}
+            color={theme.fats}
+            unit="g"
+          />
+        </View>
+      ) : (
+        <View style={styles.barsList}>
+          <MacroProgressBar
+            label="Kcal"
+            consumed={summary?.consumed.kcal ?? 0}
+            goal={summary?.goal?.kcal_goal ?? 1}
+            color={theme.kcal}
+            unit="kcal"
+          />
+          <MacroProgressBar
+            label="Proteína"
+            consumed={summary?.consumed.protein_g ?? 0}
+            goal={summary?.goal?.protein_goal ?? 1}
+            color={theme.protein}
+            unit="g"
+          />
+          <MacroProgressBar
+            label="Carbs"
+            consumed={summary?.consumed.carbs_g ?? 0}
+            goal={summary?.goal?.carbs_goal ?? 1}
+            color={theme.carbs}
+            unit="g"
+          />
+          <MacroProgressBar
+            label="Grasas"
+            consumed={summary?.consumed.fat_g ?? 0}
+            goal={summary?.goal?.fat_goal ?? 1}
+            color={theme.fats}
+            unit="g"
+          />
+        </View>
+      )}
+    </AppCard>
+  );
+
+  const intakesCard = (
+    <AppCard style={useDesktopLayout ? styles.dashboardDesktopFullRow : undefined}>
+      <SectionHeader title="Consumos de hoy" subtitle="Línea temporal" actionLabel="Recargar" onAction={() => void loadSummary()} />
+      {loadingSummary ? <ActivityIndicator color={theme.accent} /> : null}
+
+      {!loadingSummary && summary && summary.intakes.length === 0 ? (
+        <EmptyState title="Aún sin registros" subtitle="Escanea tu primer producto para empezar a construir tu día." />
+      ) : null}
+
+      {!loadingSummary && summary
+        ? summary.intakes.map((item) => {
+            const rawName = item.product_name ?? "Producto";
+            const displayName = normalizeDisplayProductName(rawName);
+            const isAiEstimated =
+              item.estimated === true ||
+              item.source_method === "meal_photo" ||
+              item.source_method === "photo_estimate" ||
+              /^estimado:\s*/i.test(rawName) ||
+              /^estimaci[oó]n:\s*/i.test(rawName);
+
+            return (
+              <View key={item.id} style={styles.intakeRow}>
+                <View style={styles.intakeTimeDotWrap}>
+                  <View style={styles.intakeTimeDot} />
+                  <Text style={styles.intakeMeta}>{new Date(item.created_at).toLocaleTimeString()}</Text>
+                </View>
+                <View style={styles.intakeMain}>
+                  <View style={styles.intakeNameRow}>
+                    <Text style={styles.intakeName} numberOfLines={1} ellipsizeMode="tail">
+                      {displayName}
+                    </Text>
+                    {isAiEstimated ? (
+                      <View style={styles.intakeAIBadge}>
+                        <Text style={styles.intakeAIBadgeText}>IA</Text>
+                      </View>
+                    ) : null}
+                  </View>
+                  <Text style={styles.intakeMeta}>
+                    {Math.round(item.quantity_g ?? 0)} g | P {Math.round(item.nutrients.protein_g)} / C{" "}
+                    {Math.round(item.nutrients.carbs_g)} / G {Math.round(item.nutrients.fat_g)}
+                  </Text>
+                </View>
+                <View style={styles.intakeRight}>
+                  <Text style={styles.intakeKcal}>{Math.round(item.nutrients.kcal)} kcal</Text>
+                  <Pressable onPress={() => confirmDeleteIntake(item.id)} style={styles.intakeDeleteBtn}>
+                    <Text style={styles.intakeDeleteText}>Eliminar</Text>
+                  </Pressable>
+                </View>
+              </View>
+            );
+          })
+        : null}
+    </AppCard>
+  );
+
+  const macroDonutBlock = <MacroDonut segments={segments} title="Distribución de macros consumidos" />;
+
+  const quickInsightsCard = (
+    <AppCard style={useDesktopLayout ? styles.dashboardDesktopInsightsCard : undefined}>
+      <SectionHeader title="Consejos rápidos" subtitle="Recomendaciones prácticas" />
+      {quickInsights.map((insight) => (
+        <View key={insight} style={styles.insightRow}>
+          <View style={styles.insightDot} />
+          <Text style={styles.helperText}>{insight}</Text>
+        </View>
+      ))}
+    </AppCard>
+  );
+
   return (
     <>
       <SafeAreaView style={styles.screen}>
-        <ScrollView contentContainerStyle={styles.mainScroll}>
+        <ScrollView contentContainerStyle={[styles.mainScroll, webMainScrollStyle]}>
         <View style={styles.dashboardHeaderRow}>
           <View style={styles.dashboardHeaderLeft}>
             <Text style={styles.dashboardGreeting}>
@@ -3318,12 +3840,14 @@ function DashboardScreen({
           <Pressable style={styles.quickWeightBtn} onPress={onOpenBodyProgress}>
             <Text style={styles.quickWeightBtnText}>+</Text>
           </Pressable>
-          <Pressable
-            onPress={toggleAccountMenu}
-            style={({ pressed }) => [styles.avatarPressable, pressed && styles.avatarPressablePressed]}
-          >
-            <AvatarCircle letter={displayName.slice(0, 1)} />
-          </Pressable>
+          {!isWeb ? (
+            <Pressable
+              onPress={toggleAccountMenu}
+              style={({ pressed }) => [styles.avatarPressable, pressed && styles.avatarPressablePressed]}
+            >
+              <AvatarCircle letter={displayName.slice(0, 1)} />
+            </Pressable>
+          ) : null}
         </View>
 
         {showDashboardSkeleton ? (
@@ -3352,204 +3876,36 @@ function DashboardScreen({
 
         {!showDashboardSkeleton ? (
           <>
-        <AppCard style={[styles.heroCard, exceededKcal && styles.heroCardExceeded]}>
-          <SectionHeader title="Resumen del día" subtitle="Kcal restantes" />
-          <Text style={styles.heroRemainingValue}>{kcalGoal > 0 ? kcalRemaining : "-"}</Text>
-          <Text style={styles.heroRemainingSub}>
-            {Math.round(kcalConsumed)} consumidas / {Math.round(kcalGoal)} objetivo
-          </Text>
-          <View style={styles.heroProgressTrack}>
-            <View
-              style={[
-                styles.heroProgressFill,
-                { width: `${kcalProgress * 100}%`, backgroundColor: exceededKcal ? theme.danger : theme.kcal },
-              ]}
-            />
-          </View>
-          <View style={styles.heroPillsRow}>
-            <TagChip label={exceededKcal ? "Sobre objetivo" : "En rango"} tone={exceededKcal ? "danger" : "accent"} />
-            <TagChip
-              label={
-                (summary?.intakes.length ?? 0) === 1
-                  ? tx("{{count}} registro", { count: summary?.intakes.length ?? 0 })
-                  : tx("{{count}} registros", { count: summary?.intakes.length ?? 0 })
-              }
-              tone={summary?.intakes.length ? "default" : "warning"}
-            />
-          </View>
-        </AppCard>
-
-        <AppCard>
-          <SectionHeader title="Macros del día" subtitle="Vista rápida" />
-          <View style={styles.macroToggleRow}>
-            <Pressable
-              style={[styles.macroToggleChip, macroViewMode === "rings" && styles.macroToggleChipActive]}
-              onPress={() => setMacroViewMode("rings")}
-            >
-              <Text style={[styles.macroToggleText, macroViewMode === "rings" && styles.macroToggleTextActive]}>Aros</Text>
-            </Pressable>
-            <Pressable
-              style={[styles.macroToggleChip, macroViewMode === "bars" && styles.macroToggleChipActive]}
-              onPress={() => setMacroViewMode("bars")}
-            >
-              <Text style={[styles.macroToggleText, macroViewMode === "bars" && styles.macroToggleTextActive]}>Barras</Text>
-            </Pressable>
-          </View>
-
-          {macroViewMode === "rings" ? (
-            <View style={styles.rowWrap}>
-              <RingProgress
-                label="kcal"
-                consumed={summary?.consumed.kcal ?? 0}
-                goal={summary?.goal?.kcal_goal ?? Math.max(summary?.consumed.kcal ?? 0, 1)}
-                color={theme.kcal}
-                unit="kcal"
-              />
-              <RingProgress
-                label="prote"
-                consumed={summary?.consumed.protein_g ?? 0}
-                goal={summary?.goal?.protein_goal ?? Math.max(summary?.consumed.protein_g ?? 0, 1)}
-                color={theme.protein}
-                unit="g"
-              />
-              <RingProgress
-                label="carbs"
-                consumed={summary?.consumed.carbs_g ?? 0}
-                goal={summary?.goal?.carbs_goal ?? Math.max(summary?.consumed.carbs_g ?? 0, 1)}
-                color={theme.carbs}
-                unit="g"
-              />
-              <RingProgress
-                label="grasas"
-                consumed={summary?.consumed.fat_g ?? 0}
-                goal={summary?.goal?.fat_goal ?? Math.max(summary?.consumed.fat_g ?? 0, 1)}
-                color={theme.fats}
-                unit="g"
-              />
-            </View>
-          ) : (
-            <View style={styles.barsList}>
-              <MacroProgressBar
-                label="Kcal"
-                consumed={summary?.consumed.kcal ?? 0}
-                goal={summary?.goal?.kcal_goal ?? 1}
-                color={theme.kcal}
-                unit="kcal"
-              />
-              <MacroProgressBar
-                label="Proteína"
-                consumed={summary?.consumed.protein_g ?? 0}
-                goal={summary?.goal?.protein_goal ?? 1}
-                color={theme.protein}
-                unit="g"
-              />
-              <MacroProgressBar
-                label="Carbs"
-                consumed={summary?.consumed.carbs_g ?? 0}
-                goal={summary?.goal?.carbs_goal ?? 1}
-                color={theme.carbs}
-                unit="g"
-              />
-              <MacroProgressBar
-                label="Grasas"
-                consumed={summary?.consumed.fat_g ?? 0}
-                goal={summary?.goal?.fat_goal ?? 1}
-                color={theme.fats}
-                unit="g"
-              />
-            </View>
-          )}
-        </AppCard>
-
-        <MacroDonut segments={segments} title="Distribución de macros consumidos" />
-
-        <AppCard>
-          <SectionHeader
-            title="Seguimiento corporal"
-            subtitle="Estado actual"
-            actionLabel="Registrar peso"
-            onAction={onOpenBodyProgress}
-          />
-          <View style={styles.metricTileRow}>
-            <MetricCard label="Peso" value={auth.profile ? `${auth.profile.weight_kg} kg` : "-"} />
-            <MetricCard label="IMC" value={auth.profile?.bmi ? auth.profile.bmi.toFixed(1) : "-"} />
-            <MetricCard
-              label="% grasa"
-              value={auth.profile?.body_fat_percent ? `${auth.profile.body_fat_percent.toFixed(1)}%` : "N/D"}
-            />
-          </View>
-          <Text style={styles.helperText}>
-            Próximo paso: tendencia semanal de peso y cambio vs semana anterior.
-          </Text>
-        </AppCard>
-
-        <AppCard>
-          <SectionHeader title="Consumos de hoy" subtitle="Línea temporal" actionLabel="Recargar" onAction={() => void loadSummary()} />
-          {loadingSummary ? <ActivityIndicator color={theme.accent} /> : null}
-
-          {!loadingSummary && summary && summary.intakes.length === 0 ? (
-            <EmptyState title="Aún sin registros" subtitle="Escanea tu primer producto para empezar a construir tu día." />
-          ) : null}
-
-          {!loadingSummary && summary
-            ? summary.intakes.map((item) => {
-                const rawName = item.product_name ?? "Producto";
-                const displayName = normalizeDisplayProductName(rawName);
-                const isAiEstimated =
-                  item.estimated === true ||
-                  item.source_method === "meal_photo" ||
-                  item.source_method === "photo_estimate" ||
-                  /^estimado:\s*/i.test(rawName) ||
-                  /^estimaci[oó]n:\s*/i.test(rawName);
-
-                return (
-                  <View key={item.id} style={styles.intakeRow}>
-                    <View style={styles.intakeTimeDotWrap}>
-                      <View style={styles.intakeTimeDot} />
-                      <Text style={styles.intakeMeta}>{new Date(item.created_at).toLocaleTimeString()}</Text>
-                    </View>
-                    <View style={styles.intakeMain}>
-                      <View style={styles.intakeNameRow}>
-                        <Text style={styles.intakeName} numberOfLines={1} ellipsizeMode="tail">
-                          {displayName}
-                        </Text>
-                        {isAiEstimated ? (
-                          <View style={styles.intakeAIBadge}>
-                            <Text style={styles.intakeAIBadgeText}>IA</Text>
-                          </View>
-                        ) : null}
-                      </View>
-                      <Text style={styles.intakeMeta}>
-                        {Math.round(item.quantity_g ?? 0)} g | P {Math.round(item.nutrients.protein_g)} / C{" "}
-                        {Math.round(item.nutrients.carbs_g)} / G {Math.round(item.nutrients.fat_g)}
-                      </Text>
-                    </View>
-                    <View style={styles.intakeRight}>
-                      <Text style={styles.intakeKcal}>{Math.round(item.nutrients.kcal)} kcal</Text>
-                      <Pressable onPress={() => confirmDeleteIntake(item.id)} style={styles.intakeDeleteBtn}>
-                        <Text style={styles.intakeDeleteText}>Eliminar</Text>
-                      </Pressable>
-                    </View>
+            {useDesktopLayout ? (
+              <>
+                <View style={[styles.dashboardDesktopMainGrid, useWideDesktopLayout && styles.dashboardDesktopMainGridWide]}>
+                  <View style={styles.dashboardDesktopLeftColumn}>
+                    {heroSummaryCard}
+                    {macroDayCard}
                   </View>
-                );
-              })
-            : null}
-        </AppCard>
-
-        <AppCard>
-          <SectionHeader title="Consejos rápidos" subtitle="Recomendaciones prácticas" />
-          {quickInsights.map((insight) => (
-            <View key={insight} style={styles.insightRow}>
-              <View style={styles.insightDot} />
-            <Text style={styles.helperText}>{insight}</Text>
-          </View>
-          ))}
-        </AppCard>
+                  <View style={styles.dashboardDesktopRightColumn}>
+                    {bodyTrackingCard}
+                    {macroDonutBlock}
+                  </View>
+                </View>
+                {intakesCard}
+                {quickInsightsCard}
+              </>
+            ) : (
+              <>
+                {heroSummaryCard}
+                {macroDayCard}
+                {bodyTrackingCard}
+                {macroDonutBlock}
+                {intakesCard}
+                {quickInsightsCard}
+              </>
+            )}
           </>
         ) : null}
         </ScrollView>
       </SafeAreaView>
-      {accountMenuVisible ? (
+      {!isWeb && accountMenuVisible ? (
         <View style={styles.accountMenuLayer} pointerEvents="box-none">
           <Pressable style={styles.accountMenuBackdrop} onPress={() => closeAccountMenu()}>
             <Animated.View style={[styles.accountMenuScrim, { opacity: accountMenuBackdropOpacity }]} />
@@ -3586,7 +3942,13 @@ function DashboardScreen({
 }
 
 function BodyProgressScreen() {
+  const { width } = useWindowDimensions();
   const auth = useAuth();
+  const breakpoint = webBreakpoint(width);
+  const useDesktopLayout = isDesktopWebLayout(width);
+  const useWideDesktopLayout = isWideDesktopWebLayout(width);
+  const webMainScrollStyle = useMemo(() => webMainContentContainerStyle(width), [width]);
+  const webBodyMenuSideInset = useMemo(() => webContentSideInset(width), [width]);
   const [loading, setLoading] = useState(true);
   const [savingWeight, setSavingWeight] = useState(false);
   const [savingMeasure, setSavingMeasure] = useState(false);
@@ -3872,7 +4234,7 @@ function BodyProgressScreen() {
   if (showBodySkeleton) {
     return (
       <SafeAreaView style={styles.screen}>
-        <ScrollView contentContainerStyle={styles.mainScroll}>
+        <ScrollView contentContainerStyle={[styles.mainScroll, webMainScrollStyle]}>
           <View style={styles.bodyPageHeader}>
             <View style={styles.bodyPageHeaderCopy}>
               <Text style={styles.bodyPageTitle}>Cuerpo</Text>
@@ -3907,7 +4269,7 @@ function BodyProgressScreen() {
   return (
     <>
       <SafeAreaView style={styles.screen}>
-        <ScrollView contentContainerStyle={styles.mainScroll}>
+        <ScrollView contentContainerStyle={[styles.mainScroll, webMainScrollStyle]}>
         <View style={styles.bodyPageHeader}>
           <View style={styles.bodyPageHeaderCopy}>
             <Text style={styles.bodyPageTitle}>Cuerpo</Text>
@@ -3918,7 +4280,8 @@ function BodyProgressScreen() {
           </Pressable>
         </View>
 
-        <AppCard>
+        <View style={useDesktopLayout ? [styles.desktopSectionGrid, useWideDesktopLayout && styles.desktopSectionGridWide] : undefined}>
+        <AppCard style={useDesktopLayout ? styles.desktopSectionGridFull : undefined}>
           <SectionHeader
             title="Resumen actual"
             subtitle="Peso, cambio semanal, IMC y % grasa"
@@ -3961,7 +4324,7 @@ function BodyProgressScreen() {
           ) : null}
         </AppCard>
 
-        <AppCard>
+        <AppCard style={useDesktopLayout ? [styles.desktopSectionGridItem, useWideDesktopLayout && styles.desktopSectionGridItemWide] : undefined}>
           <SectionHeader title="Avatar corporal" subtitle="Silueta corporal por perfil" />
           <BodyAvatarSvg
             sex={auth.profile?.sex ?? "other"}
@@ -3986,7 +4349,7 @@ function BodyProgressScreen() {
           </View>
         </AppCard>
 
-        <AppCard>
+        <AppCard style={useDesktopLayout ? [styles.desktopSectionGridItem, useWideDesktopLayout && styles.desktopSectionGridItemWide] : undefined}>
           <SectionHeader title="Tendencia de peso" subtitle="7 / 30 / 90 días" />
           <View style={styles.macroToggleRow}>
             {(["7d", "30d", "90d"] as const).map((option) => (
@@ -4022,7 +4385,7 @@ function BodyProgressScreen() {
           )}
         </AppCard>
 
-        <AppCard>
+        <AppCard style={useDesktopLayout ? [styles.desktopSectionGridItem, useWideDesktopLayout && styles.desktopSectionGridItemWide] : undefined}>
           <SectionHeader title="Tendencia % grasa" subtitle="Estimación por medidas" />
           {loading ? (
             <ActivityIndicator color={theme.accent} />
@@ -4046,7 +4409,7 @@ function BodyProgressScreen() {
           )}
         </AppCard>
 
-        <AppCard>
+        <AppCard style={useDesktopLayout ? styles.desktopSectionGridFull : undefined}>
           <SectionHeader title="Registros recientes" subtitle="Últimas entradas de peso y medidas" />
           {recentWeights.length === 0 ? (
             <EmptyState title="Sin peso registrado" subtitle="Usa 'Registrar peso' para empezar tu historial." />
@@ -4076,7 +4439,7 @@ function BodyProgressScreen() {
           ) : null}
         </AppCard>
 
-        <AppCard>
+        <AppCard style={useDesktopLayout ? [styles.desktopSectionGridItem, useWideDesktopLayout && styles.desktopSectionGridItemWide] : undefined}>
           <SectionHeader title="Consejos" subtitle="Reglas simples basadas en tu día" />
           {(summary?.hints ?? []).length === 0 ? (
             <EmptyState title="Sin alertas" subtitle="Tus métricas actuales no generan avisos." />
@@ -4089,6 +4452,7 @@ function BodyProgressScreen() {
             ))
           )}
         </AppCard>
+        </View>
         </ScrollView>
       </SafeAreaView>
       {bodyFormModalVisible ? (
@@ -4144,13 +4508,23 @@ function BodyProgressScreen() {
         </View>
       ) : null}
       {bodyActionMenuVisible ? (
-        <View style={styles.accountMenuLayer} pointerEvents="box-none">
+        <View
+          style={[
+            styles.accountMenuLayer,
+            Platform.OS === "web" && {
+              paddingTop: WEB_CHROME_TOTAL_HEIGHT + 18,
+              paddingHorizontal: webBodyMenuSideInset,
+            },
+          ]}
+          pointerEvents="box-none"
+        >
           <Pressable style={styles.accountMenuBackdrop} onPress={() => closeBodyActionMenu()}>
             <Animated.View style={[styles.accountMenuScrim, { opacity: bodyActionMenuBackdropOpacity }]} />
           </Pressable>
           <Animated.View
             style={[
               styles.accountMenuContainer,
+              Platform.OS === "web" && styles.bodyActionMenuContainerWeb,
               {
                 opacity: bodyActionMenuAnim,
                 transform: [{ translateY: bodyActionMenuTranslateY }, { scale: bodyActionMenuScale }],
@@ -4170,8 +4544,12 @@ function BodyProgressScreen() {
 }
 
 function HistoryScreen() {
+  const { width } = useWindowDimensions();
   const auth = useAuth();
   const { language } = useI18n();
+  const useDesktopLayout = isDesktopWebLayout(width);
+  const useWideDesktopLayout = isWideDesktopWebLayout(width);
+  const webMainScrollStyle = useMemo(() => webMainContentContainerStyle(width), [width]);
   const locale = language === "en" ? "en-US" : "es-ES";
   const todayIso = useMemo(() => formatDateLocal(new Date()), []);
   const [monthKey, setMonthKey] = useState(formatMonth(new Date()));
@@ -4390,7 +4768,7 @@ function HistoryScreen() {
 
   return (
     <SafeAreaView style={styles.screen}>
-      <ScrollView contentContainerStyle={styles.mainScroll}>
+      <ScrollView contentContainerStyle={[styles.mainScroll, webMainScrollStyle]}>
         <AppHeader title="Historial" subtitle="Actividad, adherencia y tendencias" />
 
         <AppCard>
@@ -4406,7 +4784,8 @@ function HistoryScreen() {
           )}
         </AppCard>
 
-        <AppCard style={styles.historyCalendarCard}>
+        <View style={useDesktopLayout ? [styles.historyDesktopSplit, useWideDesktopLayout && styles.historyDesktopSplitWide] : undefined}>
+        <AppCard style={[styles.historyCalendarCard, useDesktopLayout && styles.historyDesktopCalendarPane]}>
           <View style={styles.historyCalendarTopRow}>
             <View style={styles.historyCalendarTitleWrap}>
               <Text style={styles.historyCalendarTitle}>Calendario</Text>
@@ -4528,7 +4907,7 @@ function HistoryScreen() {
           {!loading && days.length === 0 ? <Text style={styles.historyCalendarEmptyText}>Sin registros este mes.</Text> : null}
         </AppCard>
 
-        <AppCard>
+        <AppCard style={useDesktopLayout ? styles.historyDesktopDetailPane : undefined}>
           <SectionHeader title={selectedDayTitle} subtitle={selectedDay ?? "Sin fecha seleccionada"} />
 
           {selectedDay ? (
@@ -4594,13 +4973,18 @@ function HistoryScreen() {
             <EmptyState title="Selecciona un día" subtitle="Pulsa una fecha del calendario para ver el resumen." />
           )}
         </AppCard>
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
 }
 
 function SettingsScreen() {
+  const { width } = useWindowDimensions();
   const auth = useAuth();
+  const useDesktopLayout = isDesktopWebLayout(width);
+  const useWideDesktopLayout = isWideDesktopWebLayout(width);
+  const webMainScrollStyle = useMemo(() => webMainContentContainerStyle(width), [width]);
   const { language, setLanguage } = useI18n();
   const today = useMemo(() => formatDateLocal(new Date()), []);
   const [apiDraft, setApiDraft] = useState(auth.apiBaseUrl);
@@ -4939,10 +5323,16 @@ function SettingsScreen() {
 
   return (
     <SafeAreaView style={styles.screen}>
-      <ScrollView contentContainerStyle={styles.mainScroll}>
+      <ScrollView contentContainerStyle={[styles.mainScroll, webMainScrollStyle]}>
         <AppHeader title="Ajustes" subtitle="Objetivos, perfil corporal, IA y datos" />
 
-        <AppCard style={styles.settingsHeroCard}>
+        <View style={useDesktopLayout ? [styles.desktopSectionGrid, useWideDesktopLayout && styles.desktopSectionGridWide] : undefined}>
+        <AppCard
+          style={[
+            styles.settingsHeroCard,
+            useDesktopLayout && (useWideDesktopLayout ? styles.settingsHeroDesktopWide : styles.settingsHeroDesktop),
+          ]}
+        >
           <SectionHeader title="Estado rápido" subtitle="Configuración clave del perfil" />
           <View style={styles.settingsStatusRow}>
             <TagChip label={hasGoalsConfigured ? "Objetivos listos" : "Faltan objetivos"} tone={hasGoalsConfigured ? "accent" : "warning"} />
@@ -4956,7 +5346,7 @@ function SettingsScreen() {
           />
         </AppCard>
 
-        <AppCard>
+        <AppCard style={useDesktopLayout ? [styles.desktopSectionGridItem, useWideDesktopLayout && styles.desktopSectionGridItemWide] : undefined}>
           <SectionHeader title="Idioma" subtitle="Selecciona el idioma de la app" />
           <ChoiceRow
             label="Idioma"
@@ -4971,7 +5361,7 @@ function SettingsScreen() {
           />
         </AppCard>
 
-        <AppCard>
+        <AppCard style={useDesktopLayout ? [styles.desktopSectionGridItem, useWideDesktopLayout && styles.desktopSectionGridItemWide] : undefined}>
           <SectionHeader
             title="Objetivos diarios"
             subtitle="Kcal y macros"
@@ -5032,7 +5422,7 @@ function SettingsScreen() {
           )}
         </AppCard>
 
-        <AppCard>
+        <AppCard style={useDesktopLayout ? [styles.desktopSectionGridItem, useWideDesktopLayout && styles.desktopSectionGridItemWide] : undefined}>
           <SectionHeader
             title="Perfil corporal"
             subtitle="Datos base para cálculos"
@@ -5121,7 +5511,7 @@ function SettingsScreen() {
           )}
         </AppCard>
 
-        <AppCard>
+        <AppCard style={useDesktopLayout ? [styles.desktopSectionGridItem, useWideDesktopLayout && styles.desktopSectionGridItemWide] : undefined}>
           <SectionHeader
             title="IA"
             subtitle="Clave por usuario para funciones de imagen"
@@ -5166,7 +5556,7 @@ function SettingsScreen() {
         </AppCard>
 
         {DEV_SETTINGS_MODE ? (
-          <AppCard>
+          <AppCard style={useDesktopLayout ? [styles.desktopSectionGridItem, useWideDesktopLayout && styles.desktopSectionGridItemWide] : undefined}>
             <SectionHeader
               title="App (dev)"
               subtitle="Conectividad y preferencias técnicas"
@@ -5203,7 +5593,7 @@ function SettingsScreen() {
           </AppCard>
         ) : null}
 
-        <AppCard>
+        <AppCard style={useDesktopLayout ? [styles.desktopSectionGridItem, useWideDesktopLayout && styles.desktopSectionGridItemWide] : undefined}>
           <SectionHeader
             title="Datos"
             subtitle="Exportación y utilidades"
@@ -5239,6 +5629,7 @@ function SettingsScreen() {
             </View>
           )}
         </AppCard>
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -5287,8 +5678,11 @@ function AddScreen(props: {
   onMealQuestionsVisibilityChange: (visible: boolean) => void;
   onBackToPanel: () => void;
 }) {
+  const { width } = useWindowDimensions();
   const auth = useAuth();
   const { language } = useI18n();
+  const webScanStyle = useMemo(() => webScanContainerStyle(width), [width]);
+  const webScanFrameResponsiveStyle = useMemo(() => webScanFrameStyle(width), [width]);
   const notifyMealSourceSheetVisibility = props.onMealSourceSheetVisibilityChange;
   const notifyScanCameraVisibility = props.onScanCameraVisibilityChange;
   const notifyMealQuestionsVisibility = props.onMealQuestionsVisibilityChange;
@@ -5744,6 +6138,37 @@ function AddScreen(props: {
     [favoriteProducts],
   );
 
+  const applyBarcodeLookupResult = useCallback(
+    async (rawBarcode: string, lookup: ProductLookupResponse) => {
+      setBarcode(rawBarcode);
+      if (lookup.product) {
+        setQuantityBackTarget("barcode_camera");
+        setProduct(lookup.product);
+        prefillFromPreference(lookup.product, lookup.preferred_serving);
+        setPreferredServing(lookup.preferred_serving);
+        setLabelName(lookup.product.name);
+        setLabelBrand(lookup.product.brand ?? "");
+        await new Promise((resolve) => {
+          setTimeout(resolve, 180);
+        });
+        setPhase("quantity");
+        return;
+      }
+
+      setQuantityBackTarget("barcode_camera");
+      setProduct(null);
+      setPreferredServing(null);
+      setLabelName("");
+      setLabelBrand("");
+      setLabelQuestions([
+        lookup.message ?? "No hay nutrición suficiente para este barcode.",
+        ...lookup.missing_fields.map((field) => tx("Falta {{field}}", { field })),
+      ]);
+      setPhase("label");
+    },
+    [prefillFromPreference],
+  );
+
   const handleScan = async (result: BarcodeScanningResult) => {
     if (scanLocked || scanRequestLockRef.current) {
       return;
@@ -5758,37 +6183,77 @@ function AddScreen(props: {
 
     try {
       const raw = result.data.trim();
-      setBarcode(raw);
       const lookup = await auth.lookupByBarcode(raw);
-
-      if (lookup.product) {
-        setQuantityBackTarget("barcode_camera");
-        setProduct(lookup.product);
-        prefillFromPreference(lookup.product, lookup.preferred_serving);
-        setPreferredServing(lookup.preferred_serving);
-        setLabelName(lookup.product.name);
-        setLabelBrand(lookup.product.brand ?? "");
-        await new Promise((resolve) => {
-          setTimeout(resolve, 180);
-        });
-        setPhase("quantity");
-      } else {
-        setQuantityBackTarget("barcode_camera");
-        setProduct(null);
-        setPreferredServing(null);
-        setLabelName("");
-        setLabelBrand("");
-        setLabelQuestions([
-          lookup.message ?? "No hay nutrición suficiente para este barcode.",
-          ...lookup.missing_fields.map((field) => tx("Falta {{field}}", { field })),
-        ]);
-        setPhase("label");
-      }
+      await applyBarcodeLookupResult(raw, lookup);
     } catch (error) {
       showAlert("Escáner", parseApiError(error));
       setScanLocked(false);
       scanRequestLockRef.current = false;
       setPhase("camera");
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  const lookupBarcodeFallback = async () => {
+    const raw = barcode.trim();
+    if (!raw) {
+      showAlert("Escáner", "Introduce un EAN/UPC para buscar.");
+      return;
+    }
+
+    setProcessing(true);
+    try {
+      const lookup = await auth.lookupByBarcode(raw);
+      await applyBarcodeLookupResult(raw, lookup);
+    } catch (error) {
+      showAlert("Escáner", parseApiError(error));
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  const scanBarcodeFromImage = async () => {
+    if (Platform.OS !== "web") {
+      return;
+    }
+
+    const permissionResult = await ImagePicker.requestCameraPermissionsAsync();
+    if (!permissionResult.granted) {
+      showAlert("Permisos", "Necesitas permisos de cámara para capturar y escanear.");
+      return;
+    }
+
+    const result = await ImagePicker.launchCameraAsync({ quality: 0.95, allowsEditing: false });
+    const firstAsset = result.canceled ? null : result.assets[0];
+    if (!firstAsset?.uri) {
+      return;
+    }
+
+    setShowScannedProductImage(true);
+    setProcessing(true);
+    try {
+      let matches = await scanFromURLAsync(firstAsset.uri, BARCODE_TYPES);
+      if (!matches.length) {
+        const mirrored = await ImageManipulator.manipulateAsync(
+          firstAsset.uri,
+          [{ flip: ImageManipulator.FlipType.Horizontal }],
+          { compress: 1, format: ImageManipulator.SaveFormat.JPEG, base64: false },
+        );
+        matches = await scanFromURLAsync(mirrored.uri, BARCODE_TYPES);
+      }
+
+      const firstMatch = matches.find((entry) => entry.data?.trim());
+      if (!firstMatch?.data) {
+        showAlert("Escáner", "No detectamos un barcode válido. Prueba con más luz o una imagen más nítida.");
+        return;
+      }
+
+      const raw = firstMatch.data.trim();
+      const lookup = await auth.lookupByBarcode(raw);
+      await applyBarcodeLookupResult(raw, lookup);
+    } catch (error) {
+      showAlert("Escáner", parseApiError(error));
     } finally {
       setProcessing(false);
     }
@@ -6719,12 +7184,14 @@ function AddScreen(props: {
   }, []);
 
   const isUserCreatedProduct = useCallback((item: FoodSearchItem): boolean => {
-    const source = item.product.source;
-    return (
-      item.product.created_by_user_id !== null ||
-      source === "community" ||
-      source === "community_verified"
-    );
+    if (item.origin !== "local") {
+      return false;
+    }
+    const source = (item.product.source ?? "").toLowerCase();
+    if (source.includes("openfoodfacts") || source === "off") {
+      return false;
+    }
+    return item.badge === "Comunidad" && item.product.created_by_user_id !== null;
   }, []);
 
   const goBackInAdd = useCallback(() => {
@@ -6868,7 +7335,7 @@ function AddScreen(props: {
 
   return (
     <SafeAreaView style={styles.screen}>
-      <View style={styles.scanContainer}>
+      <View style={[styles.scanContainer, webScanStyle]}>
         <AppHeader
           title={addHeaderTitle}
           subtitle={addHeaderSubtitle}
@@ -6943,53 +7410,92 @@ function AddScreen(props: {
         {mode === "barcode" && phase === "camera" && props.isActive ? (
           <View style={styles.scanCameraWrap}>
             {hasCamera ? (
-              <CameraView
-                style={styles.cameraView}
-                onBarcodeScanned={scanLocked ? undefined : handleScan}
-                barcodeScannerSettings={{ barcodeTypes: ["ean13", "ean8", "upc_a", "upc_e"] }}
-              />
+              <>
+                <CameraView
+                  style={styles.cameraView}
+                  facing={Platform.OS === "web" ? "front" : "back"}
+                  onBarcodeScanned={scanLocked ? undefined : handleScan}
+                  barcodeScannerSettings={{ barcodeTypes: BARCODE_TYPES }}
+                />
+
+                <View pointerEvents="none" style={styles.scanOverlay}>
+                  <Animated.View
+                    style={[
+                      styles.scanFrame,
+                      webScanFrameResponsiveStyle,
+                      {
+                        transform: [
+                          {
+                            scale: scanPulse.interpolate({
+                              inputRange: [0, 1],
+                              outputRange: [1, 1.03],
+                            }),
+                          },
+                        ],
+                      },
+                    ]}
+                  >
+                    <View style={[styles.scanCorner, styles.scanCornerTopLeft]} />
+                    <View style={[styles.scanCorner, styles.scanCornerTopRight]} />
+                    <View style={[styles.scanCorner, styles.scanCornerBottomLeft]} />
+                    <View style={[styles.scanCorner, styles.scanCornerBottomRight]} />
+                  </Animated.View>
+                  <Text style={styles.scanHint}>
+                    {Platform.OS === "web"
+                      ? "Guía visual: detecta códigos en toda la cámara"
+                      : "Centra el código de barras"}
+                  </Text>
+                  {scanSuccessFlash ? (
+                    <View style={styles.scanSuccessBadge}>
+                      <Text style={styles.scanSuccessBadgeText}>OK</Text>
+                    </View>
+                  ) : null}
+                </View>
+
+                {Platform.OS === "web" ? (
+                  <View style={styles.webScanToolsRow}>
+                    <Pressable
+                      style={({ pressed }) => [
+                        styles.webScanToolChip,
+                        pressed && !processing && styles.webScanToolChipPressed,
+                        processing && styles.disabledButton,
+                      ]}
+                      onPress={() => void scanBarcodeFromImage()}
+                      disabled={processing}
+                    >
+                      <Text style={styles.webScanToolChipText}>Capturar y escanear</Text>
+                    </Pressable>
+                  </View>
+                ) : null}
+
+                {processing ? (
+                  <View style={styles.scanBusyOverlay}>
+                    <ActivityIndicator color={theme.accent} size="large" />
+                    <Text style={styles.helperText}>Buscando producto...</Text>
+                  </View>
+                ) : null}
+              </>
             ) : (
               <View style={styles.centered}>
-                <Text style={styles.helperText}>Permiso de cámara pendiente.</Text>
+                <Text style={styles.helperText}>
+                  {Platform.OS === "web" ? "Cámara no disponible en este navegador." : "Permiso de cámara pendiente."}
+                </Text>
                 <SecondaryButton title="Conceder permiso" onPress={() => void requestCameraAndUnlock()} />
+                {Platform.OS === "web" ? (
+                  <View style={styles.webBarcodeFallbackCard}>
+                    <InputField
+                      label="EAN/UPC"
+                      value={barcode}
+                      onChangeText={setBarcode}
+                      keyboardType="numeric"
+                      placeholder="Ej: 8410188014561"
+                    />
+                    <PrimaryButton title="Buscar código" onPress={() => void lookupBarcodeFallback()} loading={processing} />
+                    <SecondaryButton title="Capturar y escanear" onPress={() => void scanBarcodeFromImage()} disabled={processing} />
+                  </View>
+                ) : null}
               </View>
             )}
-
-            <View pointerEvents="none" style={styles.scanOverlay}>
-              <Animated.View
-                style={[
-                  styles.scanFrame,
-                  {
-                    transform: [
-                      {
-                        scale: scanPulse.interpolate({
-                          inputRange: [0, 1],
-                          outputRange: [1, 1.03],
-                        }),
-                      },
-                    ],
-                  },
-                ]}
-              >
-                <View style={[styles.scanCorner, styles.scanCornerTopLeft]} />
-                <View style={[styles.scanCorner, styles.scanCornerTopRight]} />
-                <View style={[styles.scanCorner, styles.scanCornerBottomLeft]} />
-                <View style={[styles.scanCorner, styles.scanCornerBottomRight]} />
-              </Animated.View>
-              <Text style={styles.scanHint}>Centra el código de barras</Text>
-              {scanSuccessFlash ? (
-                <View style={styles.scanSuccessBadge}>
-                  <Text style={styles.scanSuccessBadgeText}>OK</Text>
-                </View>
-              ) : null}
-            </View>
-
-            {processing ? (
-              <View style={styles.scanBusyOverlay}>
-                <ActivityIndicator color={theme.accent} size="large" />
-                <Text style={styles.helperText}>Buscando producto...</Text>
-              </View>
-            ) : null}
           </View>
         ) : null}
 
@@ -7298,7 +7804,7 @@ function AddScreen(props: {
                           keyboardType={question.answer_type === "number" ? "numeric" : "default"}
                           style={styles.quantityInput}
                           placeholder={question.placeholder ?? tx("Respuesta")}
-                          placeholderTextColor={theme.muted}
+                          placeholderTextColor={theme.placeholder}
                         />
                       )}
                       {question.answer_type !== "single_choice" ? (
@@ -7910,6 +8416,9 @@ function QuickAddCard(props: { action: QuickAddAction; title: string; subtitle: 
 }
 
 function MainAppTabs() {
+  const { width } = useWindowDimensions();
+  const auth = useAuth();
+  const isWeb = Platform.OS === "web";
   const [tab, setTab] = useState<MainTab>("dashboard");
   const [visitedTabs, setVisitedTabs] = useState<Record<MainTab, boolean>>({
     dashboard: true,
@@ -7926,8 +8435,12 @@ function MainAppTabs() {
   const [transitionFromTab, setTransitionFromTab] = useState<MainTab | null>(null);
   const [tabTransitioning, setTabTransitioning] = useState(false);
   const [launchAction, setLaunchAction] = useState<AddLaunchAction | null>(null);
+  const [webHoveredTab, setWebHoveredTab] = useState<MainTab | null>(null);
+  const [webAccountMenuOpen, setWebAccountMenuOpen] = useState(false);
+  const [webAccountMenuVisible, setWebAccountMenuVisible] = useState(false);
   const quickAddAnim = useRef(new Animated.Value(0)).current;
   const tabBarAnim = useRef(new Animated.Value(1)).current;
+  const webAccountMenuAnim = useRef(new Animated.Value(0)).current;
   const sceneOpacityRef = useRef<Record<MainTab, Animated.Value>>({
     dashboard: new Animated.Value(1),
     body: new Animated.Value(0),
@@ -7937,12 +8450,39 @@ function MainAppTabs() {
   });
   const tabSwitchingRef = useRef(false);
   const activeTabRef = useRef<MainTab>("dashboard");
-  const shouldHideTabBar = tab === "add" && (hideTabBarForOverlay || hideTabBarForScanCamera || hideTabBarForMealQuestions);
+  const shouldHideAddTrigger = tab === "add" && (hideTabBarForOverlay || hideTabBarForScanCamera || hideTabBarForMealQuestions);
+  const shouldHideTabBar = !isWeb && shouldHideAddTrigger;
+  const useDesktopLayout = isDesktopWebLayout(width);
+  const tabBarInsetStyle = useMemo(() => {
+    if (!useDesktopLayout) {
+      return undefined;
+    }
+    return {
+      left: 24,
+      right: 24,
+      bottom: 18,
+    };
+  }, [useDesktopLayout]);
+  const quickAddInsetStyle = useMemo(() => {
+    if (isWeb || !useDesktopLayout) {
+      return undefined;
+    }
+    return {
+      paddingHorizontal: 24,
+      paddingBottom: 112,
+    };
+  }, [isWeb, useDesktopLayout]);
 
   const tabs: Array<{ value: MainTab; label: string; center?: boolean }> = [
     { value: "dashboard", label: "Panel" },
     { value: "body", label: "Cuerpo" },
     { value: "add", label: "", center: true },
+    { value: "history", label: "Historial" },
+    { value: "settings", label: "Ajustes" },
+  ];
+  const webTabs: Array<{ value: MainTab; label: string }> = [
+    { value: "dashboard", label: "Panel" },
+    { value: "body", label: "Body" },
     { value: "history", label: "Historial" },
     { value: "settings", label: "Ajustes" },
   ];
@@ -8077,6 +8617,56 @@ function MainAppTabs() {
     openQuickAdd();
   }, [closeQuickAdd, openQuickAdd, quickAddOpen]);
 
+  const openWebAccountMenu = useCallback(() => {
+    if (webAccountMenuOpen) {
+      return;
+    }
+    setWebAccountMenuVisible(true);
+    setWebAccountMenuOpen(true);
+    webAccountMenuAnim.stopAnimation();
+    Animated.spring(webAccountMenuAnim, {
+      toValue: 1,
+      damping: 22,
+      stiffness: 240,
+      mass: 0.95,
+      useNativeDriver: true,
+    }).start();
+  }, [webAccountMenuAnim, webAccountMenuOpen]);
+
+  const closeWebAccountMenu = useCallback(
+    (onClosed?: () => void) => {
+      if (!webAccountMenuVisible) {
+        onClosed?.();
+        return;
+      }
+      setWebAccountMenuOpen(false);
+      webAccountMenuAnim.stopAnimation();
+      Animated.timing(webAccountMenuAnim, {
+        toValue: 0,
+        duration: 220,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }).start(({ finished }) => {
+        if (finished) {
+          setWebAccountMenuVisible(false);
+        }
+        onClosed?.();
+      });
+    },
+    [webAccountMenuAnim, webAccountMenuVisible],
+  );
+
+  const toggleWebAccountMenu = useCallback(() => {
+    if (webAccountMenuOpen) {
+      closeWebAccountMenu();
+      return;
+    }
+    openWebAccountMenu();
+  }, [closeWebAccountMenu, openWebAccountMenu, webAccountMenuOpen]);
+
+  const webProfileName = auth.user?.username?.trim() || auth.user?.email?.split("@")[0] || "Usuario";
+  const webProfileInitial = webProfileName.slice(0, 1).toUpperCase();
+
   const quickAddSheetTranslate = quickAddAnim.interpolate({
     inputRange: [0, 1],
     outputRange: [360, 0],
@@ -8096,6 +8686,18 @@ function MainAppTabs() {
   const tabBarTranslateY = tabBarAnim.interpolate({
     inputRange: [0, 1],
     outputRange: [130, 0],
+  });
+  const webAccountMenuTranslateY = webAccountMenuAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [-14, 0],
+  });
+  const webAccountMenuScale = webAccountMenuAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.96, 1],
+  });
+  const webAccountMenuBackdropOpacity = webAccountMenuAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, 1],
   });
 
   useEffect(() => {
@@ -8127,13 +8729,88 @@ function MainAppTabs() {
     }
   }, [tab]);
 
+  useEffect(() => {
+    if (!isWeb || !quickAddOpen || !webAccountMenuOpen) {
+      return;
+    }
+    closeWebAccountMenu();
+  }, [closeWebAccountMenu, isWeb, quickAddOpen, webAccountMenuOpen]);
+
   return (
     <SafeAreaView style={styles.screen}>
+      {isWeb ? (
+        <View style={styles.webTopShell}>
+          <View style={styles.webTopBar}>
+            <Pressable
+              style={({ pressed }) => [styles.webBrandButton, pressed && styles.webBrandButtonPressed]}
+              onPress={() => closeQuickAdd(() => setTabWithFade("dashboard"))}
+            >
+              <Text style={styles.webBrandText}>NutriTracker</Text>
+            </Pressable>
+            <Pressable
+              hitSlop={10}
+              style={({ pressed }) => [styles.webProfileButton, pressed && styles.webProfileButtonPressed]}
+              onPress={toggleWebAccountMenu}
+            >
+              <View style={styles.webProfileTextWrap}>
+                <Text style={styles.webProfileName} numberOfLines={1}>
+                  {webProfileName}
+                </Text>
+                <Text style={styles.webProfileEmail} numberOfLines={1}>
+                  {auth.user?.email ?? "-"}
+                </Text>
+              </View>
+              <View style={styles.webProfileAvatar}>
+                <Text style={styles.webProfileAvatarText}>{webProfileInitial}</Text>
+              </View>
+            </Pressable>
+          </View>
+          <View style={styles.webNavBar}>
+            <View style={styles.webNavTabsRow}>
+              {webTabs.map(({ value, label }) => {
+                const active = tab === value;
+                return (
+                  <Pressable
+                    key={value}
+                    onHoverIn={() => {
+                      setWebHoveredTab(value);
+                    }}
+                    onHoverOut={() => {
+                      setWebHoveredTab((current) => (current === value ? null : current));
+                    }}
+                    onPress={() => {
+                      closeWebAccountMenu();
+                      closeQuickAdd(() => setTabWithFade(value));
+                    }}
+                    style={({ pressed }) => [
+                      styles.webNavTab,
+                      active && styles.webNavTabActive,
+                      webHoveredTab === value && styles.webNavTabHover,
+                      pressed && styles.webNavTabPressed,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.webNavTabText,
+                        webHoveredTab === value && !active && styles.webNavTabTextHover,
+                        active && styles.webNavTabTextActive,
+                      ]}
+                    >
+                      {label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+        </View>
+      ) : null}
       <View style={styles.flex1}>
         <Animated.View
           pointerEvents={tab === "dashboard" && !tabTransitioning ? "auto" : "none"}
           style={[
             styles.tabScene,
+            isWeb && styles.tabSceneWebOffset,
             {
               opacity: sceneOpacityRef.current.dashboard,
               zIndex: tab === "dashboard" ? 3 : transitionFromTab === "dashboard" ? 2 : 1,
@@ -8146,6 +8823,7 @@ function MainAppTabs() {
           pointerEvents={tab === "add" && !tabTransitioning ? "auto" : "none"}
           style={[
             styles.tabScene,
+            isWeb && styles.tabSceneWebOffset,
             {
               opacity: sceneOpacityRef.current.add,
               zIndex: tab === "add" ? 3 : transitionFromTab === "add" ? 2 : 1,
@@ -8176,6 +8854,7 @@ function MainAppTabs() {
           pointerEvents={tab === "body" && !tabTransitioning ? "auto" : "none"}
           style={[
             styles.tabScene,
+            isWeb && styles.tabSceneWebOffset,
             {
               opacity: sceneOpacityRef.current.body,
               zIndex: tab === "body" ? 3 : transitionFromTab === "body" ? 2 : 1,
@@ -8188,6 +8867,7 @@ function MainAppTabs() {
           pointerEvents={tab === "history" && !tabTransitioning ? "auto" : "none"}
           style={[
             styles.tabScene,
+            isWeb && styles.tabSceneWebOffset,
             {
               opacity: sceneOpacityRef.current.history,
               zIndex: tab === "history" ? 3 : transitionFromTab === "history" ? 2 : 1,
@@ -8200,6 +8880,7 @@ function MainAppTabs() {
           pointerEvents={tab === "settings" && !tabTransitioning ? "auto" : "none"}
           style={[
             styles.tabScene,
+            isWeb && styles.tabSceneWebOffset,
             {
               opacity: sceneOpacityRef.current.settings,
               zIndex: tab === "settings" ? 3 : transitionFromTab === "settings" ? 2 : 1,
@@ -8210,41 +8891,96 @@ function MainAppTabs() {
         </Animated.View>
       </View>
 
-      <Animated.View
-        pointerEvents={shouldHideTabBar ? "none" : "auto"}
-        style={[styles.tabBar, { opacity: tabBarAnim, transform: [{ translateY: tabBarTranslateY }] }]}
-      >
-        {tabs.map(({ value, label, center }) => {
-          const active = tab === value;
-          const isCenter = Boolean(center);
-          return (
-            <Pressable
-              key={value}
-              onPress={() => {
-                if (isCenter) {
-                  toggleQuickAdd();
-                  return;
+      {!isWeb ? (
+        <Animated.View
+          pointerEvents={shouldHideTabBar ? "none" : "auto"}
+          style={[styles.tabBar, tabBarInsetStyle, { opacity: tabBarAnim, transform: [{ translateY: tabBarTranslateY }] }]}
+        >
+          {tabs.map(({ value, label, center }) => {
+            const active = tab === value;
+            const isCenter = Boolean(center);
+            return (
+              <Pressable
+                key={value}
+                onPress={() => {
+                  if (isCenter) {
+                    toggleQuickAdd();
+                    return;
+                  }
+                  closeQuickAdd(() => setTabWithFade(value));
+                }}
+                style={[styles.tabItem, isCenter && styles.tabItemCenter, active && !isCenter && styles.tabItemActive]}
+              >
+                {isCenter ? (
+                  <View style={[styles.tabPlusButton, quickAddOpen && styles.tabPlusButtonActive]}>
+                    <Animated.View style={[styles.tabPlusGlyph, { transform: [{ rotate: quickAddPlusRotate }] }]}>
+                      <Svg width={26} height={26} viewBox="0 0 26 26" fill="none">
+                        <Line x1={13} y1={5} x2={13} y2={21} stroke="#04101f" strokeWidth={3} strokeLinecap="round" />
+                        <Line x1={5} y1={13} x2={21} y2={13} stroke="#04101f" strokeWidth={3} strokeLinecap="round" />
+                      </Svg>
+                    </Animated.View>
+                  </View>
+                ) : (
+                  <>
+                    <BottomTabIcon tab={value as Exclude<MainTab, "add">} active={active} />
+                    <Text style={[styles.tabText, active && styles.tabTextActive]}>{label}</Text>
+                  </>
+                )}
+              </Pressable>
+            );
+          })}
+        </Animated.View>
+      ) : null}
+      {isWeb && !shouldHideAddTrigger ? (
+        <View style={styles.webFloatingAddWrap} pointerEvents="box-none">
+          <Pressable
+            onPress={toggleQuickAdd}
+            style={({ pressed }) => [styles.webFloatingAddButton, quickAddOpen && styles.tabPlusButtonActive, pressed && styles.webFloatingAddButtonPressed]}
+          >
+            <Animated.View style={[styles.tabPlusGlyph, { transform: [{ rotate: quickAddPlusRotate }] }]}>
+              <Svg width={30} height={30} viewBox="0 0 26 26" fill="none">
+                <Line x1={13} y1={5} x2={13} y2={21} stroke="#04101f" strokeWidth={3} strokeLinecap="round" />
+                <Line x1={5} y1={13} x2={21} y2={13} stroke="#04101f" strokeWidth={3} strokeLinecap="round" />
+              </Svg>
+            </Animated.View>
+          </Pressable>
+        </View>
+      ) : null}
+      {isWeb && webAccountMenuVisible ? (
+        <View style={[styles.accountMenuLayer, styles.webAccountMenuLayer]} pointerEvents="box-none">
+          <Pressable style={styles.accountMenuBackdrop} onPress={() => closeWebAccountMenu()}>
+            <Animated.View style={[styles.accountMenuScrim, { opacity: webAccountMenuBackdropOpacity }]} />
+          </Pressable>
+          <Animated.View
+            style={[
+              styles.accountMenuContainer,
+              styles.webAccountMenuContainer,
+              {
+                opacity: webAccountMenuAnim,
+                transform: [{ translateY: webAccountMenuTranslateY }, { scale: webAccountMenuScale }],
+              },
+            ]}
+          >
+            <Pressable style={styles.accountMenuCard} onPress={() => {}}>
+              <Text style={styles.accountMenuTitle}>Mi cuenta</Text>
+              <StatRow label="Usuario" value={auth.user?.username ?? "-"} />
+              <StatRow label="Email" value={auth.user?.email ?? "-"} />
+              <StatRow label="Email verificado" value={auth.user?.email_verified ? "Sí" : "No"} />
+              <StatRow label="Onboarding" value={auth.user?.onboarding_completed ? "Completado" : "Pendiente"} />
+              <SecondaryButton
+                title="Cerrar sesión"
+                onPress={() =>
+                  closeWebAccountMenu(() => {
+                    void auth.logout();
+                  })
                 }
-                closeQuickAdd(() => setTabWithFade(value));
-              }}
-              style={[styles.tabItem, isCenter && styles.tabItemCenter, active && !isCenter && styles.tabItemActive]}
-            >
-              {isCenter ? (
-                <View style={[styles.tabPlusButton, quickAddOpen && styles.tabPlusButtonActive]}>
-                  <Animated.Text style={[styles.tabPlusText, { transform: [{ rotate: quickAddPlusRotate }] }]}>+</Animated.Text>
-                </View>
-              ) : (
-                <>
-                  <BottomTabIcon tab={value as Exclude<MainTab, "add">} active={active} />
-                  <Text style={[styles.tabText, active && styles.tabTextActive]}>{label}</Text>
-                </>
-              )}
+              />
             </Pressable>
-          );
-        })}
-      </Animated.View>
+          </Animated.View>
+        </View>
+      ) : null}
       {quickAddVisible ? (
-        <View style={styles.quickAddLayer} pointerEvents="box-none">
+        <View style={[styles.quickAddLayer, isWeb && styles.quickAddLayerWeb, quickAddInsetStyle]} pointerEvents="box-none">
           <Pressable style={styles.quickAddBackdrop} onPress={() => closeQuickAdd()}>
             <Animated.View style={[styles.quickAddScrim, { opacity: quickAddBackdropOpacity }]} />
           </Pressable>
@@ -8252,6 +8988,7 @@ function MainAppTabs() {
             pointerEvents="box-none"
             style={[
               styles.quickAddSheetContainer,
+              isWeb && styles.quickAddSheetContainerWeb,
               {
                 opacity: quickAddAnim,
                 transform: [{ translateY: quickAddSheetTranslate }, { scale: quickAddSheetScale }],
@@ -8336,6 +9073,9 @@ const styles = StyleSheet.create({
   flex1: { flex: 1 },
   tabScene: {
     ...StyleSheet.absoluteFillObject,
+  },
+  tabSceneWebOffset: {
+    top: WEB_CHROME_TOTAL_HEIGHT,
   },
   screen: {
     flex: 1,
@@ -8437,13 +9177,36 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     letterSpacing: 0.3,
   },
+  headerTitleTablet: {
+    fontSize: 36,
+    lineHeight: 40,
+  },
+  headerTitleDesktop: {
+    fontSize: 44,
+    lineHeight: 48,
+    letterSpacing: 0.2,
+  },
   headerSubtitle: {
     color: theme.muted,
     fontSize: 13,
     lineHeight: 19,
   },
+  headerSubtitleTablet: {
+    fontSize: 15,
+    lineHeight: 22,
+    maxWidth: 760,
+  },
+  headerSubtitleDesktop: {
+    fontSize: 16,
+    lineHeight: 24,
+    maxWidth: 920,
+  },
   authScroll: {
-    padding: 20,
+    width: "100%",
+    alignSelf: "center",
+    paddingTop: 20,
+    paddingBottom: 28,
+    paddingHorizontal: Platform.OS === "web" ? 24 : 20,
     gap: 14,
   },
   brandCard: {
@@ -8481,20 +9244,37 @@ const styles = StyleSheet.create({
   },
   input: {
     borderWidth: 1,
-    borderColor: theme.border,
+    borderColor: theme.inputBorder,
     borderRadius: 14,
     paddingHorizontal: 14,
     paddingVertical: 12,
     color: theme.text,
-    backgroundColor: theme.panelSoft,
+    backgroundColor: theme.inputBg,
+  },
+  inputFocused: {
+    borderColor: theme.inputFocusBorder,
+  },
+  webDateFieldWrap: {
+    borderWidth: 1,
+    borderColor: theme.inputBorder,
+    borderRadius: 14,
+    backgroundColor: theme.inputBg,
+  },
+  webDateNativeInput: {
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    color: theme.text,
+    fontSize: 14,
+    fontWeight: "600",
+    minHeight: 46,
   },
   dateFieldButton: {
     borderWidth: 1,
-    borderColor: theme.border,
+    borderColor: theme.inputBorder,
     borderRadius: 14,
     paddingHorizontal: 14,
     paddingVertical: 12,
-    backgroundColor: theme.panelSoft,
+    backgroundColor: theme.inputBg,
   },
   dateFieldButtonText: {
     color: theme.text,
@@ -8503,11 +9283,37 @@ const styles = StyleSheet.create({
   },
   birthDatePickerWrap: {
     borderWidth: 1,
-    borderColor: theme.border,
+    borderColor: theme.inputBorder,
     borderRadius: 14,
     padding: 8,
-    backgroundColor: theme.panelSoft,
+    backgroundColor: theme.inputBg,
     gap: 8,
+  },
+  passwordStrengthWrap: {
+    gap: 8,
+    marginTop: -2,
+    marginBottom: 2,
+  },
+  passwordStrengthHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  passwordStrengthLabel: {
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  passwordStrengthTrack: {
+    height: 7,
+    borderRadius: 999,
+    backgroundColor: theme.panelMuted,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: theme.border,
+  },
+  passwordStrengthFill: {
+    height: "100%",
+    borderRadius: 999,
   },
   usernameStatusText: {
     fontSize: 12,
@@ -8533,16 +9339,23 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   primaryButton: {
-    backgroundColor: theme.accent,
+    backgroundColor: theme.primaryButtonBg,
     borderWidth: 1,
-    borderColor: theme.accent,
+    borderColor: theme.primaryButtonBg,
     borderRadius: 16,
     paddingVertical: 15,
     alignItems: "center",
     justifyContent: "center",
   },
+  primaryButtonHover: {
+    backgroundColor: "#ffffff",
+    borderColor: "#ffffff",
+  },
+  primaryButtonPressed: {
+    opacity: 0.92,
+  },
   primaryButtonText: {
-    color: "#050505",
+    color: theme.primaryButtonText,
     fontSize: 15,
     fontWeight: "700",
   },
@@ -8572,12 +9385,18 @@ const styles = StyleSheet.create({
   },
   secondaryButton: {
     borderWidth: 1,
-    borderColor: theme.border,
+    borderColor: theme.secondaryButtonBorder,
     borderRadius: 16,
     paddingVertical: 12,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: theme.panelSoft,
+    backgroundColor: theme.secondaryButtonBg,
+  },
+  secondaryButtonHover: {
+    backgroundColor: theme.panelMuted,
+  },
+  secondaryButtonPressed: {
+    opacity: 0.92,
   },
   secondaryButtonText: {
     color: theme.text,
@@ -8635,6 +9454,16 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 6 },
     elevation: 3,
   },
+  appCardTablet: {
+    borderRadius: 26,
+    padding: 22,
+    gap: 16,
+  },
+  appCardDesktop: {
+    borderRadius: 28,
+    padding: 26,
+    gap: 18,
+  },
   sectionHeaderWrap: {
     flexDirection: "row",
     alignItems: "center",
@@ -8650,9 +9479,22 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontWeight: "700",
   },
+  sectionHeaderTitleTablet: {
+    fontSize: 19,
+  },
+  sectionHeaderTitleDesktop: {
+    fontSize: 22,
+    letterSpacing: 0.2,
+  },
   sectionHeaderSubtitle: {
     color: theme.muted,
     fontSize: 12,
+  },
+  sectionHeaderSubtitleTablet: {
+    fontSize: 13,
+  },
+  sectionHeaderSubtitleDesktop: {
+    fontSize: 14,
   },
   sectionHeaderAction: {
     borderWidth: 1,
@@ -8790,6 +9632,126 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     fontSize: 15,
   },
+  webTopShell: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 80,
+    backgroundColor: theme.topbarBg,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.topbarBorder,
+  },
+  webTopBar: {
+    height: WEB_TOPBAR_HEIGHT,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 24,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.topbarBorder,
+  },
+  webBrandButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 2,
+  },
+  webBrandButtonPressed: {
+    opacity: 0.82,
+  },
+  webBrandText: {
+    color: theme.text,
+    fontSize: 20,
+    fontWeight: "800",
+    letterSpacing: 0.4,
+  },
+  webProfileButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    borderWidth: 1,
+    borderColor: theme.border,
+    borderRadius: 999,
+    backgroundColor: theme.panelSoft,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    maxWidth: 360,
+  },
+  webProfileButtonPressed: {
+    opacity: 0.9,
+    transform: [{ scale: 0.99 }],
+  },
+  webProfileTextWrap: {
+    gap: 1,
+    minWidth: 0,
+    maxWidth: 270,
+  },
+  webProfileName: {
+    color: theme.text,
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  webProfileEmail: {
+    color: theme.muted,
+    fontSize: 11,
+  },
+  webProfileAvatar: {
+    width: 30,
+    height: 30,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: theme.panelMuted,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  webProfileAvatarText: {
+    color: theme.text,
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  webNavBar: {
+    height: WEB_NAVBAR_HEIGHT,
+    justifyContent: "center",
+    paddingHorizontal: 24,
+    backgroundColor: theme.topbarBg,
+  },
+  webNavTabsRow: {
+    width: "100%",
+    maxWidth: 1400,
+    alignSelf: "center",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 24,
+  },
+  webNavTab: {
+    borderWidth: 0,
+    borderBottomWidth: 2,
+    borderColor: "transparent",
+    borderRadius: 0,
+    paddingHorizontal: 4,
+    paddingVertical: 12,
+    backgroundColor: "transparent",
+  },
+  webNavTabActive: {
+    borderBottomColor: theme.kcal,
+  },
+  webNavTabHover: {
+    borderBottomColor: "rgba(45, 212, 191, 0.36)",
+  },
+  webNavTabPressed: {
+    opacity: 0.85,
+  },
+  webNavTabText: {
+    color: theme.muted,
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  webNavTabTextHover: {
+    color: "#c7c7d0",
+  },
+  webNavTabTextActive: {
+    color: theme.text,
+  },
   accountMenuLayer: {
     ...StyleSheet.absoluteFillObject,
     paddingHorizontal: 16,
@@ -8806,6 +9768,18 @@ const styles = StyleSheet.create({
   accountMenuContainer: {
     width: "86%",
     maxWidth: 340,
+  },
+  webAccountMenuLayer: {
+    paddingTop: WEB_CHROME_TOTAL_HEIGHT + 12,
+    paddingHorizontal: 24,
+  },
+  webAccountMenuContainer: {
+    width: "100%",
+    maxWidth: 380,
+  },
+  bodyActionMenuContainerWeb: {
+    width: "100%",
+    maxWidth: 300,
   },
   accountMenuCard: {
     borderWidth: 1,
@@ -8955,9 +9929,46 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   mainScroll: {
-    padding: 16,
-    gap: 14,
-    paddingBottom: 90,
+    width: "100%",
+    alignSelf: "stretch",
+    paddingTop: 16,
+    paddingHorizontal: Platform.OS === "web" ? 18 : 16,
+    gap: Platform.OS === "web" ? 18 : 14,
+    paddingBottom: Platform.OS === "web" ? 120 : 90,
+  },
+  desktopSectionGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 16,
+    alignItems: "flex-start",
+  },
+  desktopSectionGridWide: {
+    gap: 18,
+  },
+  desktopSectionGridItem: {
+    flexBasis: "48.8%",
+    flexGrow: 1,
+    minWidth: Platform.OS === "web" ? 320 : 0,
+  },
+  desktopSectionGridItemWide: {
+    flexBasis: "31.8%",
+    minWidth: Platform.OS === "web" ? 300 : 0,
+  },
+  desktopSectionGridFull: {
+    flexBasis: "100%",
+    width: "100%",
+  },
+  desktopSectionGridHero: {
+    flexBasis: "60%",
+    minWidth: Platform.OS === "web" ? 460 : 0,
+  },
+  settingsHeroDesktop: {
+    flexBasis: "48.8%",
+    minWidth: Platform.OS === "web" ? 360 : 0,
+  },
+  settingsHeroDesktopWide: {
+    flexBasis: "31.8%",
+    minWidth: Platform.OS === "web" ? 320 : 0,
   },
   dashboardHeaderRow: {
     flexDirection: "row",
@@ -8987,6 +9998,7 @@ const styles = StyleSheet.create({
     backgroundColor: theme.panelSoft,
     alignItems: "center",
     justifyContent: "center",
+    marginLeft: Platform.OS === "web" ? "auto" : 0,
   },
   quickWeightBtnText: {
     color: theme.text,
@@ -8997,6 +10009,42 @@ const styles = StyleSheet.create({
   heroCard: {
     gap: 10,
   },
+  dashboardHeroDesktop: {
+    width: "100%",
+  },
+  dashboardDesktopMainGrid: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 18,
+  },
+  dashboardDesktopMainGridWide: {
+    gap: 20,
+  },
+  dashboardDesktopLeftColumn: {
+    flexBasis: "62%",
+    flexGrow: 1,
+    minWidth: 0,
+    gap: 16,
+  },
+  dashboardDesktopRightColumn: {
+    flexBasis: "38%",
+    flexGrow: 0,
+    minWidth: 0,
+    gap: 16,
+  },
+  dashboardRingsShowcaseGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
+    alignItems: "stretch",
+    gap: 12,
+  },
+  dashboardDesktopFullRow: {
+    marginTop: 16,
+  },
+  dashboardDesktopInsightsCard: {
+    marginTop: 16,
+  },
   heroCardExceeded: {
     borderColor: theme.danger,
   },
@@ -9005,6 +10053,15 @@ const styles = StyleSheet.create({
     fontSize: 48,
     fontWeight: "800",
     lineHeight: 52,
+  },
+  heroRemainingValueTablet: {
+    fontSize: 58,
+    lineHeight: 62,
+  },
+  heroRemainingValueDesktop: {
+    fontSize: 70,
+    lineHeight: 74,
+    letterSpacing: -0.8,
   },
   heroRemainingSub: {
     color: theme.muted,
@@ -9205,19 +10262,51 @@ const styles = StyleSheet.create({
     backgroundColor: theme.panelSoft,
     gap: 3,
   },
+  metricTileTablet: {
+    minWidth: 124,
+    borderRadius: 14,
+    paddingHorizontal: 13,
+    paddingVertical: 12,
+  },
+  metricTileDesktop: {
+    minWidth: 156,
+    borderRadius: 16,
+    paddingHorizontal: 15,
+    paddingVertical: 14,
+  },
   metricTileLabel: {
     color: theme.muted,
     fontSize: 11,
     fontWeight: "600",
+  },
+  metricTileLabelTablet: {
+    fontSize: 12,
+  },
+  metricTileLabelDesktop: {
+    fontSize: 13,
   },
   metricTileValue: {
     color: theme.text,
     fontSize: 16,
     fontWeight: "800",
   },
+  metricTileValueTablet: {
+    fontSize: 20,
+    lineHeight: 22,
+  },
+  metricTileValueDesktop: {
+    fontSize: 24,
+    lineHeight: 28,
+  },
   metricTileSubtitle: {
     color: theme.muted,
     fontSize: 11,
+  },
+  metricTileSubtitleTablet: {
+    fontSize: 12,
+  },
+  metricTileSubtitleDesktop: {
+    fontSize: 13,
   },
   weightChartWrap: {
     minHeight: 126,
@@ -9360,24 +10449,45 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     gap: 4,
   },
+  ringCardHero: {
+    width: "48.5%",
+    minWidth: 224,
+    borderRadius: 18,
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+  },
   ringCenter: {
     position: "absolute",
     top: 38,
     alignItems: "center",
     width: "100%",
   },
+  ringCenterHero: {
+    top: 45,
+  },
   ringLabel: {
     color: theme.muted,
     fontSize: 12,
+  },
+  ringLabelHero: {
+    fontSize: 13,
   },
   ringValue: {
     color: theme.text,
     fontSize: 20,
     fontWeight: "700",
   },
+  ringValueHero: {
+    fontSize: 30,
+    lineHeight: 32,
+    fontWeight: "800",
+  },
   ringUnit: {
     color: theme.muted,
     fontSize: 11,
+  },
+  ringUnitHero: {
+    fontSize: 12,
   },
   ringFoot: {
     color: theme.muted,
@@ -9590,6 +10700,25 @@ const styles = StyleSheet.create({
   },
   historyCalendarCard: {
     gap: 14,
+  },
+  historyDesktopSplit: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 16,
+    alignItems: "flex-start",
+  },
+  historyDesktopSplitWide: {
+    gap: 18,
+  },
+  historyDesktopCalendarPane: {
+    flexBasis: "43%",
+    flexGrow: 1,
+    minWidth: Platform.OS === "web" ? 420 : 0,
+  },
+  historyDesktopDetailPane: {
+    flexBasis: "53%",
+    flexGrow: 1,
+    minWidth: Platform.OS === "web" ? 420 : 0,
   },
   historyCalendarTopRow: {
     flexDirection: "row",
@@ -9964,7 +11093,11 @@ const styles = StyleSheet.create({
   },
   scanContainer: {
     flex: 1,
-    padding: 16,
+    width: "100%",
+    alignSelf: "stretch",
+    paddingTop: 16,
+    paddingBottom: 16,
+    paddingHorizontal: Platform.OS === "web" ? 18 : 16,
     gap: 12,
   },
   scanCameraWrap: {
@@ -10057,6 +11190,44 @@ const styles = StyleSheet.create({
   scanPane: {
     paddingBottom: 100,
     gap: 12,
+  },
+  webBarcodeFallbackCard: {
+    width: "100%",
+    maxWidth: 420,
+    gap: 10,
+    marginTop: 6,
+  },
+  webScanToolsRow: {
+    position: "absolute",
+    left: 16,
+    right: 16,
+    bottom: 12,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "center",
+    gap: 8,
+    zIndex: 6,
+  },
+  webScanToolChip: {
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.38)",
+    backgroundColor: "rgba(7,10,16,0.75)",
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    minHeight: 36,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  webScanToolChipPressed: {
+    backgroundColor: "rgba(12,18,30,0.92)",
+    borderColor: "rgba(255,255,255,0.56)",
+  },
+  webScanToolChipText: {
+    color: "#f4f4f5",
+    fontSize: 12,
+    fontWeight: "600",
+    letterSpacing: 0.2,
   },
   mealPhotoPreviewWrap: {
     width: "100%",
@@ -10766,6 +11937,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingBottom: 94,
   },
+  quickAddLayerWeb: {
+    alignItems: "center",
+    paddingHorizontal: 0,
+    paddingBottom: 118,
+  },
   quickAddBackdrop: {
     ...StyleSheet.absoluteFillObject,
   },
@@ -10775,6 +11951,11 @@ const styles = StyleSheet.create({
   },
   quickAddSheetContainer: {
     width: "100%",
+  },
+  quickAddSheetContainerWeb: {
+    width: "52%",
+    maxWidth: 740,
+    minWidth: 360,
   },
   quickAddSheet: {
     borderWidth: 1,
@@ -10831,30 +12012,58 @@ const styles = StyleSheet.create({
   },
   tabBar: {
     position: "absolute",
-    left: 14,
-    right: 14,
-    bottom: 12,
+    left: 16,
+    right: 16,
+    bottom: 14,
     zIndex: 40,
     elevation: 20,
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: theme.panel,
-    borderRadius: 18,
+    borderRadius: 22,
     borderWidth: 1,
     borderColor: theme.border,
-    paddingHorizontal: 8,
-    paddingTop: 8,
-    paddingBottom: 10,
+    paddingHorizontal: 14,
+    paddingTop: 10,
+    paddingBottom: 12,
     gap: 0,
+  },
+  webFloatingAddWrap: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 18,
+    alignItems: "center",
+    zIndex: 74,
+    elevation: 24,
+    pointerEvents: "box-none",
+  },
+  webFloatingAddButton: {
+    width: 72,
+    height: 72,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#1f6ed3",
+    backgroundColor: "#4da3ff",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#0f58ad",
+    shadowOpacity: 0.38,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 8,
+  },
+  webFloatingAddButtonPressed: {
+    transform: [{ scale: 0.98 }],
   },
   tabItem: {
     flex: 1,
-    minHeight: 54,
-    paddingVertical: 6,
+    minHeight: 60,
+    paddingVertical: 7,
     borderRadius: 12,
     alignItems: "center",
     justifyContent: "center",
-    gap: 4,
+    gap: 5,
   },
   tabItemCenter: {
     justifyContent: "center",
@@ -10863,8 +12072,8 @@ const styles = StyleSheet.create({
     backgroundColor: "#252525",
   },
   tabPlusButton: {
-    width: 58,
-    height: 58,
+    width: 64,
+    height: 64,
     borderRadius: 999,
     borderWidth: 1,
     borderColor: "#1f6ed3",
@@ -10882,12 +12091,11 @@ const styles = StyleSheet.create({
     backgroundColor: "#63afff",
     borderColor: "#2d7fe2",
   },
-  tabPlusText: {
-    color: "#04101f",
-    fontWeight: "800",
-    fontSize: 34,
-    lineHeight: 34,
-    marginTop: -2,
+  tabPlusGlyph: {
+    width: 26,
+    height: 26,
+    alignItems: "center",
+    justifyContent: "center",
   },
   tabText: {
     color: theme.muted,

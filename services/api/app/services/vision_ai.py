@@ -122,9 +122,54 @@ def _question_matches_portion(prompt: str) -> bool:
     )
 
 
-def _question_matches_added_fats(prompt: str) -> bool:
+def _question_mentions_added_fats(prompt: str) -> bool:
     lowered = prompt.lower()
     return any(token in lowered for token in {"aceite", "salsa", "mantequilla", "oil", "sauce", "butter"})
+
+
+def _question_is_detail_request(prompt: str) -> bool:
+    lowered = prompt.lower()
+    return any(
+        token in lowered
+        for token in {
+            "tipo",
+            "qué tipo",
+            "que tipo",
+            "cuál",
+            "cual",
+            "what kind",
+            "what type",
+            "which",
+            "ingrediente",
+            "ingredient",
+        }
+    )
+
+
+def _question_matches_added_fats_presence(prompt: str) -> bool:
+    lowered = prompt.lower()
+    if not _question_mentions_added_fats(lowered):
+        return False
+    if _question_is_detail_request(lowered):
+        return False
+    return any(
+        token in lowered
+        for token in {
+            "lleva",
+            "incluye",
+            "tiene",
+            "añadid",
+            "añad",
+            "include",
+            "includes",
+            "included",
+            "contain",
+            "contains",
+            "has",
+            "had",
+            "added",
+        }
+    )
 
 
 def _question_matches_quantity(prompt: str) -> bool:
@@ -169,7 +214,7 @@ def _prioritize_question_items(
                 return
 
     _pick_by_match(_question_matches_portion)
-    _pick_by_match(_question_matches_added_fats)
+    _pick_by_match(_question_matches_added_fats_presence)
     _pick_by_match(_question_matches_quantity)
 
     for item in merged:
@@ -244,6 +289,104 @@ def _coherence_adjust_nutrition(nutrition: dict[str, float]) -> tuple[dict[str, 
         adjusted["kcal"] = round(kcal_from_macros * 1.04, 2)
         degraded = True
     return adjusted, degraded
+
+
+def _capitalize_first(value: str) -> str:
+    trimmed = value.strip()
+    if not trimmed:
+        return ""
+    return trimmed[0].upper() + trimmed[1:]
+
+
+def _is_binary_option_set(options: list[str]) -> bool:
+    if not options:
+        return False
+    normalized: set[str] = set()
+    for option in options:
+        lowered = option.strip().lower()
+        if lowered in {"yes", "si", "sí"}:
+            normalized.add("yes")
+            continue
+        if lowered == "no":
+            normalized.add("no")
+            continue
+        if lowered in {"unknown", "i don't know", "dont know", "no sé", "no se"}:
+            normalized.add("unknown")
+            continue
+        return False
+    return normalized.issubset({"yes", "no", "unknown"}) and bool(normalized)
+
+
+def _canonical_quantity_prompt(locale: AppLocale) -> str:
+    if locale == "en":
+        return "How many grams of the full dish did you eat approximately?"
+    return "¿Cuántos gramos del plato completo consumiste aproximadamente?"
+
+
+def _canonical_quantity_placeholder(locale: AppLocale) -> str:
+    if locale == "en":
+        return "Example: 350"
+    return "Ej: 350"
+
+
+def _normalize_single_choice_options(
+    *,
+    item_id: str,
+    options: list[str],
+    locale: AppLocale,
+) -> list[str]:
+    portion_map_es = {"small": "Pequeña", "medium": "Mediana", "large": "Grande"}
+    portion_map_en = {"small": "Small", "medium": "Medium", "large": "Large"}
+    yes_no_map_es = {"yes": "Sí", "no": "No"}
+    yes_no_map_en = {"yes": "Yes", "no": "No"}
+    unknown_map_es = {"unknown": "No sé"}
+    unknown_map_en = {"unknown": "I don't know"}
+
+    def _normalize_token(option: str) -> str:
+        lowered = option.strip().lower()
+        if lowered in {"small", "peque", "pequeña", "pequena", "pequeño", "pequeno"}:
+            return "small"
+        if lowered in {"medium", "mediana", "media"}:
+            return "medium"
+        if lowered in {"large", "grande"}:
+            return "large"
+        if lowered in {"yes", "si", "sí"}:
+            return "yes"
+        if lowered in {"no"}:
+            return "no"
+        if lowered in {"unknown", "i don't know", "dont know", "no sé", "no se"}:
+            return "unknown"
+        return lowered
+
+    normalized_tokens = [_normalize_token(option) for option in options if option.strip()]
+
+    if item_id == "portion_size":
+        labels = portion_map_en if locale == "en" else portion_map_es
+        return [labels["small"], labels["medium"], labels["large"]]
+
+    if item_id == "added_fats":
+        labels = yes_no_map_en if locale == "en" else yes_no_map_es
+        return [labels["yes"], labels["no"]]
+
+    if normalized_tokens and all(token in {"yes", "no", "unknown"} for token in normalized_tokens):
+        yes_no_labels = yes_no_map_en if locale == "en" else yes_no_map_es
+        unknown_labels = unknown_map_en if locale == "en" else unknown_map_es
+        output: list[str] = []
+        for token in normalized_tokens:
+            if token in {"yes", "no"}:
+                output.append(yes_no_labels[token])
+            elif token == "unknown":
+                output.append(unknown_labels["unknown"])
+        return output
+
+    if normalized_tokens and all(token in {"small", "medium", "large"} for token in normalized_tokens):
+        portion_labels = portion_map_en if locale == "en" else portion_map_es
+        output: list[str] = []
+        for token in normalized_tokens:
+            output.append(portion_labels[token])
+        return output
+
+    return [_capitalize_first(option) for option in options if option.strip()]
 
 
 async def _image_urls_from_uploads(photo_files: list[UploadFile]) -> list[str]:
@@ -396,7 +539,7 @@ async def extract_label_nutrition_with_ai(
     }
 
 
-def _coerce_question_items(raw_value: Any) -> list[dict[str, Any]]:
+def _coerce_question_items(raw_value: Any, *, locale: AppLocale = "es") -> list[dict[str, Any]]:
     if not isinstance(raw_value, list):
         return []
 
@@ -441,22 +584,27 @@ def _coerce_question_items(raw_value: Any) -> list[dict[str, Any]]:
             answer_type = "single_choice"
             if not options:
                 options = ["small", "medium", "large"]
-        elif _question_matches_added_fats(prompt):
+        elif _question_matches_added_fats_presence(prompt):
             item_id = "added_fats"
             answer_type = "single_choice"
             if not options:
                 options = ["yes", "no"]
         elif _question_matches_quantity(prompt):
             item_id = "quantity_note"
-            if answer_type == "text":
-                answer_type = "number"
-            if not placeholder:
-                placeholder = "250" if "¿" in prompt or "cantidad" in prompt.lower() else "250"
+            answer_type = "number"
+            prompt = _canonical_quantity_prompt(locale)
+            placeholder = _canonical_quantity_placeholder(locale)
+        elif _question_is_detail_request(prompt) and _is_binary_option_set(options):
+            answer_type = "text"
+            options = []
+            placeholder = "Short answer" if locale == "en" else "Respuesta breve"
 
         if answer_type == "single_choice" and not options:
             options = ["yes", "no"]
         if answer_type != "single_choice":
             options = []
+        else:
+            options = _normalize_single_choice_options(item_id=item_id, options=options, locale=locale)
 
         items.append(
             {
@@ -492,13 +640,13 @@ def _heuristic_question_items(heuristic_result: dict[str, Any], *, locale: AppLo
                     "id": "portion_size",
                     "prompt": "What portion size was it?" if locale == "en" else "¿Qué tamaño tenía la ración?",
                     "answer_type": "single_choice",
-                    "options": ["small", "medium", "large"],
+                    "options": ["Small", "Medium", "Large"] if locale == "en" else ["Pequeña", "Mediana", "Grande"],
                     "placeholder": None,
                 }
             )
             continue
 
-        if any(token in lowered for token in {"aceite", "salsa", "mantequilla", "oil", "sauce", "butter"}):
+        if _question_matches_added_fats_presence(prompt):
             fallback_items.append(
                 {
                     "id": "added_fats",
@@ -508,25 +656,20 @@ def _heuristic_question_items(heuristic_result: dict[str, Any], *, locale: AppLo
                         else "¿Llevaba aceite o salsas añadidas?"
                     ),
                     "answer_type": "single_choice",
-                    "options": ["yes", "no"],
+                    "options": ["Yes", "No"] if locale == "en" else ["Sí", "No"],
                     "placeholder": None,
                 }
             )
             continue
 
-        if any(
-            token in lowered
-            for token in {"cantidad", "cucharada", "plato", "quantity", "tbsp", "portion", "plate"}
-        ):
+        if _question_matches_quantity(prompt):
             fallback_items.append(
                 {
                     "id": "quantity_note",
-                    "prompt": "Approximate quantity? (e.g., 1 plate, 2 tablespoons)"
-                    if locale == "en"
-                    else "¿Cantidad aproximada? (ej: 1 plato, 2 cucharadas)",
-                    "answer_type": "text",
+                    "prompt": _canonical_quantity_prompt(locale),
+                    "answer_type": "number",
                     "options": [],
-                    "placeholder": "1 plate / 250 g / 2 tbsp" if locale == "en" else "1 plato / 250 g / 2 cucharadas",
+                    "placeholder": _canonical_quantity_placeholder(locale),
                 }
             )
             continue
@@ -625,7 +768,7 @@ async def generate_meal_questions_with_ai(
 
     assumptions = [str(item).strip() for item in data.get("assumptions", []) if str(item).strip()]
     ingredients = [str(item).strip() for item in data.get("detected_ingredients", []) if str(item).strip()]
-    question_items = _coerce_question_items(data.get("questions"))
+    question_items = _coerce_question_items(data.get("questions"), locale=normalized_locale)
 
     if not question_items:
         question_items = list(fallback_items)
@@ -791,7 +934,7 @@ async def estimate_meal_with_ai(
         confidence_level = _degrade_confidence(confidence_level, steps=1)
 
     assumptions = [str(item).strip() for item in data.get("assumptions", []) if str(item).strip()]
-    question_items = _coerce_question_items(data.get("questions"))
+    question_items = _coerce_question_items(data.get("questions"), locale=normalized_locale)
     questions = _questions_plain(question_items)
     ingredients = [str(item).strip() for item in data.get("detected_ingredients", []) if str(item).strip()]
 
