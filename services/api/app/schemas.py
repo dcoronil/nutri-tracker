@@ -5,13 +5,14 @@ from typing import Literal
 
 from pydantic import BaseModel, EmailStr, Field, model_validator
 
-from app.models import ActivityLevel, GoalType, IntakeMethod, NutritionBasis, Sex
+from app.models import ActivityLevel, GoalType, IntakeMethod, NutritionBasis, RecipeMealType, Sex
 
 
 class AuthUser(BaseModel):
     id: int
     email: str
     username: str
+    avatar_url: str | None = None
     sex: Sex
     birth_date: date | None = None
     email_verified: bool
@@ -189,6 +190,244 @@ class UserAIKeyTestResponse(BaseModel):
     message: str
 
 
+class SocialUserRead(BaseModel):
+    id: int
+    username: str
+    email: str
+    avatar_url: str | None = None
+
+
+class SocialSearchItem(SocialUserRead):
+    friendship_status: Literal["none", "incoming_pending", "outgoing_pending", "friends"] = "none"
+    friendship_id: int | None = None
+
+
+class SocialUserSearchResponse(BaseModel):
+    items: list[SocialSearchItem] = Field(default_factory=list)
+
+
+class FriendRequestCreate(BaseModel):
+    to_user_identifier: str = Field(min_length=3, max_length=255)
+
+
+class FriendRequestRead(BaseModel):
+    id: int
+    status: Literal["pending", "accepted", "rejected", "cancelled"]
+    created_at: datetime
+    responded_at: datetime | None = None
+    user: SocialUserRead
+
+
+class FriendshipOverviewResponse(BaseModel):
+    friends: list[SocialUserRead] = Field(default_factory=list)
+    incoming_requests: list[FriendRequestRead] = Field(default_factory=list)
+    outgoing_requests: list[FriendRequestRead] = Field(default_factory=list)
+
+
+class SocialRecipePayload(BaseModel):
+    title: str = Field(min_length=1, max_length=140)
+    servings: int | None = Field(default=None, ge=1, le=100)
+    prep_time_min: int | None = Field(default=None, ge=0, le=1440)
+    ingredients: list[str] = Field(default_factory=list)
+    steps: list[str] = Field(default_factory=list)
+    nutrition_kcal: float | None = Field(default=None, ge=0)
+    nutrition_protein_g: float | None = Field(default=None, ge=0)
+    nutrition_carbs_g: float | None = Field(default=None, ge=0)
+    nutrition_fat_g: float | None = Field(default=None, ge=0)
+    tags: list[str] = Field(default_factory=list)
+
+
+class SocialProgressPayload(BaseModel):
+    weight_kg: float | None = Field(default=None, gt=0)
+    body_fat_pct: float | None = Field(default=None, ge=0, le=100)
+    bmi: float | None = Field(default=None, ge=0)
+    notes: str | None = Field(default=None, max_length=1024)
+
+
+class SocialPostMediaRead(BaseModel):
+    id: int
+    media_url: str
+    width: int | None = None
+    height: int | None = None
+    order_index: int
+
+
+class SocialCommentCreate(BaseModel):
+    text: str = Field(min_length=1, max_length=1000)
+
+
+class SocialCommentRead(BaseModel):
+    id: int
+    text: str
+    created_at: datetime
+    user: SocialUserRead
+
+
+class SocialPostUpdate(BaseModel):
+    visibility: Literal["public", "friends", "private"]
+
+
+class SocialDeleteResponse(BaseModel):
+    deleted: bool
+
+
+class SocialPostRead(BaseModel):
+    id: str
+    type: Literal["photo", "recipe", "progress"]
+    caption: str | None = None
+    visibility: Literal["public", "friends", "private"]
+    created_at: datetime
+    updated_at: datetime
+    user: SocialUserRead
+    media: list[SocialPostMediaRead] = Field(default_factory=list)
+    recipe: SocialRecipePayload | None = None
+    progress: SocialProgressPayload | None = None
+    like_count: int = 0
+    comment_count: int = 0
+    liked_by_me: bool = False
+    source: Literal["friends", "explore", "self"] = "explore"
+
+
+class SocialFeedResponse(BaseModel):
+    items: list[SocialPostRead] = Field(default_factory=list)
+    next_cursor: str | None = None
+
+
+class SocialProfilePostsResponse(BaseModel):
+    user: SocialUserRead
+    is_me: bool
+    is_friend: bool
+    outgoing_request_pending: bool = False
+    incoming_request_pending: bool = False
+    posts_count: int = 0
+    friends_count: int = 0
+    items: list[SocialPostRead] = Field(default_factory=list)
+    next_cursor: str | None = None
+
+
+class SocialLikeToggleResponse(BaseModel):
+    liked: bool
+    like_count: int
+
+
+class RecipeIngredientItem(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    quantity: float | None = Field(default=None, ge=0)
+    unit: str | None = Field(default=None, max_length=32)
+
+
+class UserRecipeUpsert(BaseModel):
+    title: str = Field(min_length=2, max_length=140)
+    meal_type: RecipeMealType
+    servings: int = Field(ge=1, le=100)
+    prep_time_min: int | None = Field(default=None, ge=0, le=1440)
+    ingredients: list[RecipeIngredientItem] = Field(default_factory=list)
+    steps: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
+    nutrition_kcal: float = Field(ge=0)
+    nutrition_protein_g: float = Field(ge=0)
+    nutrition_carbs_g: float = Field(ge=0)
+    nutrition_fat_g: float = Field(ge=0)
+    default_quantity_units: float | None = Field(default=None, gt=0, le=100)
+
+    @model_validator(mode="after")
+    def validate_recipe_content(self) -> "UserRecipeUpsert":
+        cleaned_steps = [step.strip() for step in self.steps if step.strip()]
+        if not self.ingredients:
+            raise ValueError("Añade al menos un ingrediente.")
+        if not cleaned_steps:
+            raise ValueError("Añade al menos un paso.")
+        self.steps = cleaned_steps
+        self.tags = [tag.strip() for tag in self.tags if tag.strip()][:12]
+        return self
+
+
+class UserRecipeRead(UserRecipeUpsert):
+    id: int
+    generated_with_ai: bool = False
+    coach_feedback: str | None = None
+    assumptions: list[str] = Field(default_factory=list)
+    suggested_extras: list[str] = Field(default_factory=list)
+    created_at: datetime
+    updated_at: datetime
+    product: ProductRead
+    preferred_serving: ProductPreference | None = None
+
+
+class RecipeGenerateRequest(BaseModel):
+    meal_type: RecipeMealType
+    target_kcal: float | None = Field(default=None, ge=0)
+    target_protein_g: float | None = Field(default=None, ge=0)
+    target_fat_g: float | None = Field(default=None, ge=0)
+    target_carbs_g: float | None = Field(default=None, ge=0)
+    goal_mode: GoalType | None = None
+    use_only_ingredients: bool = True
+    allergies: list[str] = Field(default_factory=list)
+    preferences: list[str] = Field(default_factory=list)
+    available_ingredients: list[RecipeIngredientItem] = Field(default_factory=list)
+    allow_basic_pantry: bool = True
+    locale: Literal["es", "en"] | None = None
+
+    @model_validator(mode="after")
+    def validate_ingredients(self) -> "RecipeGenerateRequest":
+        if not self.available_ingredients:
+            raise ValueError("Añade al menos un ingrediente disponible.")
+        self.allergies = [item.strip() for item in self.allergies if item.strip()][:16]
+        self.preferences = [item.strip() for item in self.preferences if item.strip()][:16]
+        return self
+
+
+class RecipeGenerateFeedback(BaseModel):
+    summary: str
+    highlights: list[str] = Field(default_factory=list)
+    gaps: list[str] = Field(default_factory=list)
+    tips: list[str] = Field(default_factory=list)
+    suggested_extras: list[str] = Field(default_factory=list)
+
+
+class RecipeGenerateResponse(BaseModel):
+    model_used: Literal["gpt-4o-mini"] = "gpt-4o-mini"
+    recipe: UserRecipeUpsert
+    feedback: RecipeGenerateFeedback
+    assumptions: list[str] = Field(default_factory=list)
+
+
+class RecipeAiOptionPreview(BaseModel):
+    option_id: str = Field(min_length=1, max_length=32)
+    title: str = Field(min_length=2, max_length=140)
+    meal_type: RecipeMealType
+    servings: int = Field(ge=1, le=100)
+    prep_time_min: int | None = Field(default=None, ge=0, le=1440)
+    tags: list[str] = Field(default_factory=list)
+    nutrition_kcal: float = Field(ge=0)
+    nutrition_protein_g: float = Field(ge=0)
+    nutrition_carbs_g: float = Field(ge=0)
+    nutrition_fat_g: float = Field(ge=0)
+    summary: str = ""
+    highlights: list[str] = Field(default_factory=list)
+    complexity: Literal["low", "medium", "high"] = "medium"
+    recommended: bool = False
+    recommended_reason: str | None = None
+
+
+class RecipeAiOptionsResponse(BaseModel):
+    generation_id: str = Field(min_length=8, max_length=64)
+    model_used: Literal["gpt-4o-mini"] = "gpt-4o-mini"
+    options: list[RecipeAiOptionPreview] = Field(default_factory=list)
+
+
+class RecipeAiDetailRequest(BaseModel):
+    generation_id: str = Field(min_length=8, max_length=64)
+    option_id: str = Field(min_length=1, max_length=32)
+
+
+class RecipeAiDetailResponse(RecipeGenerateResponse):
+    generation_id: str
+    option_id: str
+    recommended: bool = False
+    recommended_reason: str | None = None
+
+
 class ProductPreference(BaseModel):
     method: IntakeMethod
     quantity_g: float | None = None
@@ -302,7 +541,7 @@ class CommunityFoodCreate(BaseModel):
 
 class FoodSearchItem(BaseModel):
     product: ProductRead
-    badge: Literal["Verificado", "Comunidad", "Importado", "Estimado"]
+    badge: Literal["Verificado", "Comunidad", "Importado", "Estimado", "Generico"]
     origin: Literal["local", "openfoodfacts_remote"] = "local"
 
 

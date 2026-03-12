@@ -4,11 +4,13 @@ import {
   Animated,
   Alert,
   Easing,
+  FlatList,
   Image,
   KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
+  RefreshControl,
   SafeAreaView,
   ScrollView,
   Share,
@@ -17,6 +19,7 @@ import {
   TextInput as RNTextInput,
   type TextInputProps,
   type TextProps,
+  type TextStyle,
   type ViewStyle,
   useWindowDimensions,
   Vibration,
@@ -42,7 +45,7 @@ type IntakeMethod = "grams" | "percent_pack" | "units";
 type Sex = "male" | "female" | "other";
 type ActivityLevel = "sedentary" | "light" | "moderate" | "active" | "athlete";
 type GoalType = "lose" | "maintain" | "gain";
-type MainTab = "dashboard" | "add" | "body" | "history" | "settings";
+type MainTab = "dashboard" | "add" | "body" | "social" | "history" | "settings";
 type AddMode = "hub" | "barcode" | "label_fix" | "meal_photo" | "manual" | "recipes";
 type QuickAddAction = "barcode" | "meal_photo" | "manual" | "recipes";
 type AddLaunchAction = {
@@ -57,6 +60,7 @@ type AuthUser = {
   id: number;
   email: string;
   username: string;
+  avatar_url: string | null;
   sex: Sex;
   birth_date: string | null;
   email_verified: boolean;
@@ -414,6 +418,197 @@ type RepeatIntakesResponse = {
   to_day: string;
 };
 
+type RecipeMealType = "breakfast" | "brunch" | "lunch" | "snack" | "dinner";
+
+type RecipeIngredientItem = {
+  name: string;
+  quantity: number | null;
+  unit: string | null;
+};
+
+type UserRecipePayload = {
+  title: string;
+  meal_type: RecipeMealType;
+  servings: number;
+  prep_time_min: number | null;
+  ingredients: RecipeIngredientItem[];
+  steps: string[];
+  tags: string[];
+  nutrition_kcal: number;
+  nutrition_protein_g: number;
+  nutrition_carbs_g: number;
+  nutrition_fat_g: number;
+  default_quantity_units?: number;
+};
+
+type UserRecipe = UserRecipePayload & {
+  id: number;
+  generated_with_ai: boolean;
+  coach_feedback: string | null;
+  assumptions: string[];
+  suggested_extras: string[];
+  created_at: string;
+  updated_at: string;
+  product: Product;
+  preferred_serving: ProductPreference | null;
+};
+
+type RecipeGenerateFeedback = {
+  summary: string;
+  highlights: string[];
+  gaps: string[];
+  tips: string[];
+  suggested_extras: string[];
+};
+
+type RecipeGenerateResponse = {
+  model_used: "gpt-4o-mini";
+  recipe: UserRecipePayload;
+  feedback: RecipeGenerateFeedback;
+  assumptions: string[];
+};
+
+type RecipeAiOptionPreview = {
+  option_id: string;
+  title: string;
+  meal_type: RecipeMealType;
+  servings: number;
+  prep_time_min: number | null;
+  tags: string[];
+  nutrition_kcal: number;
+  nutrition_protein_g: number;
+  nutrition_carbs_g: number;
+  nutrition_fat_g: number;
+  summary: string;
+  highlights: string[];
+  complexity: "low" | "medium" | "high";
+  recommended: boolean;
+  recommended_reason: string | null;
+};
+
+type RecipeAiOptionsResponse = {
+  generation_id: string;
+  model_used: "gpt-4o-mini";
+  options: RecipeAiOptionPreview[];
+};
+
+type RecipeAiDetailResponse = RecipeGenerateResponse & {
+  generation_id: string;
+  option_id: string;
+  recommended: boolean;
+  recommended_reason: string | null;
+};
+
+type FriendshipStatus = "none" | "incoming_pending" | "outgoing_pending" | "friends";
+type SocialPostType = "photo" | "recipe" | "progress";
+type SocialVisibility = "public" | "friends" | "private";
+type SocialFeedSort = "relevance" | "recent";
+type SocialFeedTypeFilter = "all" | SocialPostType;
+
+type SocialUser = {
+  id: number;
+  username: string;
+  email: string;
+  avatar_url: string | null;
+};
+
+type SocialSearchItem = SocialUser & {
+  friendship_status: FriendshipStatus;
+  friendship_id: number | null;
+};
+
+type SocialSearchResponse = {
+  items: SocialSearchItem[];
+};
+
+type SocialFriendRequest = {
+  id: number;
+  status: "pending" | "accepted" | "rejected" | "cancelled";
+  created_at: string;
+  responded_at: string | null;
+  user: SocialUser;
+};
+
+type SocialOverview = {
+  friends: SocialUser[];
+  incoming_requests: SocialFriendRequest[];
+  outgoing_requests: SocialFriendRequest[];
+};
+
+type SocialPostMedia = {
+  id: number;
+  media_url: string;
+  width: number | null;
+  height: number | null;
+  order_index: number;
+};
+
+type SocialRecipePayload = {
+  title: string;
+  servings: number | null;
+  prep_time_min: number | null;
+  ingredients: string[];
+  steps: string[];
+  nutrition_kcal: number | null;
+  nutrition_protein_g: number | null;
+  nutrition_carbs_g: number | null;
+  nutrition_fat_g: number | null;
+  tags: string[];
+};
+
+type SocialProgressPayload = {
+  weight_kg: number | null;
+  body_fat_pct: number | null;
+  bmi: number | null;
+  notes: string | null;
+};
+
+type SocialPost = {
+  id: string;
+  type: SocialPostType;
+  caption: string | null;
+  visibility: SocialVisibility;
+  created_at: string;
+  updated_at: string;
+  user: SocialUser;
+  media: SocialPostMedia[];
+  recipe: SocialRecipePayload | null;
+  progress: SocialProgressPayload | null;
+  like_count: number;
+  comment_count: number;
+  liked_by_me: boolean;
+  source: "friends" | "explore" | "self";
+};
+
+type SocialFeedResponse = {
+  items: SocialPost[];
+  next_cursor: string | null;
+};
+
+type SocialProfileResponse = {
+  user: SocialUser;
+  is_me: boolean;
+  is_friend: boolean;
+  outgoing_request_pending: boolean;
+  incoming_request_pending: boolean;
+  posts_count: number;
+  friends_count: number;
+  items: SocialPost[];
+  next_cursor: string | null;
+};
+
+type SocialLikeToggleResponse = {
+  liked: boolean;
+  like_count: number;
+};
+
+type SocialComment = {
+  id: number;
+  text: string;
+  created_at: string;
+  user: SocialUser;
+};
+
 type WidgetTodaySummary = {
   date: string;
   kcal_remaining: number;
@@ -460,6 +655,7 @@ type AuthContextValue = {
   logout: () => Promise<void>;
   refreshMe: () => Promise<void>;
   saveProfile: (payload: ProfileInput) => Promise<Profile>;
+  uploadProfileAvatar: (photoUri: string) => Promise<AuthUser>;
   fetchAnalysis: (day: string) => Promise<AnalysisResponse>;
   fetchGoal: (day: string) => Promise<DailyGoalResponse | null>;
   saveGoal: (day: string, goal: GoalPayload) => Promise<DailyGoalResponse>;
@@ -490,8 +686,41 @@ type AuthContextValue = {
     fiber_g?: number;
     salt_g?: number;
   }) => Promise<Product>;
-  searchFoods: (query: string, limit?: number) => Promise<FoodSearchResponse>;
+  searchFoods: (query: string, limit?: number, signal?: AbortSignal) => Promise<FoodSearchResponse>;
   fetchMyCommunityFoods: (limit?: number) => Promise<Product[]>;
+  fetchMyRecipes: (input?: { limit?: number; query?: string }) => Promise<UserRecipe[]>;
+  fetchRecipe: (recipeId: number) => Promise<UserRecipe>;
+  createRecipe: (payload: UserRecipePayload) => Promise<UserRecipe>;
+  updateRecipe: (recipeId: number, payload: UserRecipePayload) => Promise<UserRecipe>;
+  generateRecipe: (payload: {
+    meal_type: RecipeMealType;
+    target_kcal?: number;
+    target_protein_g?: number;
+    target_fat_g?: number;
+    target_carbs_g?: number;
+    goal_mode?: GoalType;
+    use_only_ingredients: boolean;
+    allergies?: string[];
+    preferences?: string[];
+    available_ingredients: RecipeIngredientItem[];
+    allow_basic_pantry: boolean;
+    locale?: "es" | "en";
+  }) => Promise<RecipeGenerateResponse>;
+  generateRecipeOptions: (payload: {
+    meal_type: RecipeMealType;
+    target_kcal?: number;
+    target_protein_g?: number;
+    target_fat_g?: number;
+    target_carbs_g?: number;
+    goal_mode?: GoalType;
+    use_only_ingredients: boolean;
+    allergies?: string[];
+    preferences?: string[];
+    available_ingredients: RecipeIngredientItem[];
+    allow_basic_pantry: boolean;
+    locale?: "es" | "en";
+  }) => Promise<RecipeAiOptionsResponse>;
+  fetchRecipeAiDetail: (payload: { generation_id: string; option_id: string }) => Promise<RecipeAiDetailResponse>;
   lookupByBarcode: (ean: string) => Promise<ProductLookupResponse>;
   createProductFromLabel: (input: {
     barcode?: string;
@@ -568,6 +797,33 @@ type AuthContextValue = {
   addFavoriteProduct: (productId: number) => Promise<void>;
   removeFavoriteProduct: (productId: number) => Promise<void>;
   repeatIntakesFromDay: (fromDay: string, toDay?: string) => Promise<RepeatIntakesResponse>;
+  searchSocialUsers: (query: string, limit?: number) => Promise<SocialSearchItem[]>;
+  fetchSocialOverview: () => Promise<SocialOverview>;
+  sendFriendRequest: (targetUserId: number) => Promise<SocialFriendRequest>;
+  acceptFriendRequest: (friendshipId: number) => Promise<SocialFriendRequest>;
+  rejectFriendRequest: (friendshipId: number) => Promise<SocialFriendRequest>;
+  fetchSocialFeed: (input?: {
+    cursor?: string | null;
+    limit?: number;
+    scope?: "feed" | "explore";
+    sort?: SocialFeedSort;
+    postType?: SocialFeedTypeFilter;
+  }) => Promise<SocialFeedResponse>;
+  fetchSocialProfile: (input?: { userId?: number; cursor?: string | null; limit?: number }) => Promise<SocialProfileResponse>;
+  createSocialPost: (payload: {
+    type: SocialPostType;
+    caption?: string;
+    visibility: SocialVisibility;
+    photos?: string[];
+    recipe?: SocialRecipePayload | null;
+    progress?: SocialProgressPayload | null;
+  }) => Promise<SocialPost>;
+  updateSocialPostVisibility: (postId: string, visibility: SocialVisibility) => Promise<SocialPost>;
+  deleteSocialPost: (postId: string) => Promise<void>;
+  likeSocialPost: (postId: string) => Promise<SocialLikeToggleResponse>;
+  unlikeSocialPost: (postId: string) => Promise<SocialLikeToggleResponse>;
+  fetchSocialComments: (postId: string) => Promise<SocialComment[]>;
+  createSocialComment: (postId: string, text: string) => Promise<SocialComment>;
   setApiBaseUrl: (url: string) => void;
   checkHealth: (url?: string) => Promise<boolean>;
 };
@@ -648,11 +904,75 @@ function inferApiBaseUrl(): string {
     return "http://10.0.2.2:8000";
   }
 
-  return envUrl || "http://localhost:8000";
+  return "http://localhost:8000";
+}
+
+function guessImageMimeType(nameOrUri: string): string {
+  const normalized = nameOrUri.toLowerCase();
+  if (normalized.endsWith(".png")) {
+    return "image/png";
+  }
+  if (normalized.endsWith(".webp")) {
+    return "image/webp";
+  }
+  if (normalized.endsWith(".heic") || normalized.endsWith(".heif")) {
+    return "image/heic";
+  }
+  return "image/jpeg";
+}
+
+async function appendImageUriToFormData(form: FormData, field: string, uri: string, fallbackName: string): Promise<void> {
+  const sanitizedName = fallbackName.replace(/\?.*$/, "");
+  if (Platform.OS === "web") {
+    const response = await fetch(uri);
+    const blob = await response.blob();
+    form.append(field, blob, sanitizedName);
+    return;
+  }
+  form.append(
+    field,
+    {
+      uri,
+      name: sanitizedName,
+      type: guessImageMimeType(sanitizedName || uri),
+    } as unknown as Blob,
+  );
+}
+
+async function prepareAvatarUploadUri(asset: ImagePicker.ImagePickerAsset): Promise<string> {
+  if (!asset.uri) {
+    throw new Error("Avatar image missing uri");
+  }
+  let avatarUri = asset.uri;
+  try {
+    const size = Math.max(asset.width ?? 0, asset.height ?? 0);
+    if (size > 720 && asset.width && asset.height) {
+      const scale = 720 / size;
+      const result = await ImageManipulator.manipulateAsync(
+        asset.uri,
+        [
+          {
+            resize: {
+              width: Math.max(1, Math.round(asset.width * scale)),
+              height: Math.max(1, Math.round(asset.height * scale)),
+            },
+          },
+        ],
+        {
+          compress: 0.82,
+          format: ImageManipulator.SaveFormat.JPEG,
+        },
+      );
+      avatarUri = result.uri || asset.uri;
+    }
+  } catch {
+    avatarUri = asset.uri;
+  }
+  return avatarUri;
 }
 
 type WebBreakpoint = "mobile" | "tablet" | "desktop";
-const WEB_TOPBAR_HEIGHT = 60;
+const WEB_TOPBAR_HEIGHT = 72;
 const WEB_NAVBAR_HEIGHT = 52;
 const WEB_CHROME_TOTAL_HEIGHT = WEB_TOPBAR_HEIGHT + WEB_NAVBAR_HEIGHT;
 const BARCODE_TYPES: BarcodeType[] = ["ean13", "ean8", "upc_a", "upc_e"];
@@ -840,6 +1160,14 @@ function parseApiError(error: unknown): string {
   return message;
 }
 
+function isAbortRequestError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  const message = error.message.toLowerCase();
+  return error.name === "AbortError" || message.includes("abort");
+}
+
 function formatDateLocal(day: Date): string {
   const y = day.getFullYear();
   const m = String(day.getMonth() + 1).padStart(2, "0");
@@ -876,6 +1204,21 @@ function toOptionalNumber(input: string): number | null {
   return parsed;
 }
 
+function recipeMealTypeLabel(mealType: RecipeMealType): string {
+  const labels: Record<RecipeMealType, string> = {
+    breakfast: "Desayuno",
+    brunch: "Almuerzo",
+    lunch: "Comida",
+    snack: "Merienda",
+    dinner: "Cena",
+  };
+  return labels[mealType] ?? "Comida";
+}
+
+function createLocalDraftKey(prefix: string): string {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 function toPositiveNumberOrNull(input: string): number | null {
   const trimmed = input.trim();
   if (!trimmed) {
@@ -905,6 +1248,119 @@ function parseBirthDateInput(value: string): Date | null {
     return null;
   }
   return result;
+}
+
+function formatRelativeTime(iso: string): string {
+  const timestamp = new Date(iso).getTime();
+  if (!Number.isFinite(timestamp)) {
+    return "-";
+  }
+  const diffSeconds = Math.max(0, Math.round((Date.now() - timestamp) / 1000));
+  if (diffSeconds < 45) {
+    return "Ahora";
+  }
+  if (diffSeconds < 3600) {
+    const minutes = Math.max(1, Math.round(diffSeconds / 60));
+    return `Hace ${minutes} min`;
+  }
+  if (diffSeconds < 86400) {
+    const hours = Math.max(1, Math.round(diffSeconds / 3600));
+    return `Hace ${hours} h`;
+  }
+  if (diffSeconds < 86400 * 7) {
+    const days = Math.max(1, Math.round(diffSeconds / 86400));
+    return `Hace ${days} d`;
+  }
+  return new Date(iso).toLocaleDateString("es-ES", { day: "2-digit", month: "short" });
+}
+
+function socialTypeLabel(type: SocialPostType): string {
+  if (type === "recipe") {
+    return "Receta";
+  }
+  if (type === "progress") {
+    return "Progreso";
+  }
+  return "Foto";
+}
+
+function socialVisibilityLabel(visibility: SocialVisibility): string {
+  if (visibility === "public") {
+    return "Pública";
+  }
+  if (visibility === "private") {
+    return "Privada";
+  }
+  return "Amigos";
+}
+
+function socialTypeMeta(type: SocialPostType): {
+  color: string;
+  borderColor: string;
+  softBackground: string;
+} {
+  if (type === "recipe") {
+    return {
+      color: theme.carbs,
+      borderColor: "rgba(245,158,11,0.34)",
+      softBackground: "rgba(245,158,11,0.10)",
+    };
+  }
+  if (type === "progress") {
+    return {
+      color: theme.protein,
+      borderColor: "rgba(96,165,250,0.34)",
+      softBackground: "rgba(96,165,250,0.10)",
+    };
+  }
+  return {
+    color: theme.accent,
+    borderColor: "rgba(45,212,191,0.34)",
+    softBackground: "rgba(45,212,191,0.10)",
+  };
+}
+
+type MacroAccentTone = "kcal" | "protein" | "carbs" | "fat";
+
+function macroAccentMeta(tone: MacroAccentTone): {
+  color: string;
+  softBackground: string;
+  borderColor: string;
+} {
+  if (tone === "protein") {
+    return {
+      color: theme.protein,
+      softBackground: "rgba(96,165,250,0.10)",
+      borderColor: "rgba(96,165,250,0.30)",
+    };
+  }
+  if (tone === "carbs") {
+    return {
+      color: theme.carbs,
+      softBackground: "rgba(245,158,11,0.10)",
+      borderColor: "rgba(245,158,11,0.30)",
+    };
+  }
+  if (tone === "fat") {
+    return {
+      color: theme.fats,
+      softBackground: "rgba(236,72,153,0.10)",
+      borderColor: "rgba(236,72,153,0.30)",
+    };
+  }
+  return {
+    color: theme.kcal,
+    softBackground: "rgba(45,212,191,0.10)",
+    borderColor: "rgba(45,212,191,0.30)",
+  };
+}
+
+function socialFeedSortLabel(sort: SocialFeedSort): string {
+  return sort === "recent" ? "Más reciente" : "Relevancia";
+}
+
+function socialFeedTypeFilterLabel(type: SocialFeedTypeFilter): string {
+  return type === "all" ? "Todo" : socialTypeLabel(type);
 }
 
 function passwordStrengthMeta(password: string): {
@@ -1393,6 +1849,21 @@ function AuthProvider({ children }: { children: import("react").ReactNode }) {
     [refreshMe, request],
   );
 
+  const uploadProfileAvatar = useCallback(
+    async (photoUri: string): Promise<AuthUser> => {
+      const form = new FormData();
+      const fallbackName = photoUri.split("/").pop() || "avatar.jpg";
+      await appendImageUriToFormData(form, "photo", photoUri, fallbackName);
+      const response = await request<AuthUser>("/me/avatar", {
+        method: "POST",
+        body: form,
+      });
+      setUser(response);
+      return response;
+    },
+    [request],
+  );
+
   const fetchAnalysis = useCallback(
     async (day: string): Promise<AnalysisResponse> => request<AnalysisResponse>(`/me/analysis?day=${day}`),
     [request],
@@ -1555,15 +2026,116 @@ function AuthProvider({ children }: { children: import("react").ReactNode }) {
   );
 
   const searchFoods = useCallback(
-    async (query: string, limit = 20): Promise<FoodSearchResponse> => {
+    async (query: string, limit = 20, signal?: AbortSignal): Promise<FoodSearchResponse> => {
       const encoded = encodeURIComponent(query.trim());
-      return request<FoodSearchResponse>(`/foods/search?q=${encoded}&limit=${limit}`);
+      return request<FoodSearchResponse>(`/foods/search?q=${encoded}&limit=${limit}`, { signal });
     },
     [request],
   );
 
   const fetchMyCommunityFoods = useCallback(
     async (limit = 100): Promise<Product[]> => request<Product[]>(`/foods/mine?limit=${limit}`),
+    [request],
+  );
+
+  const fetchMyRecipes = useCallback(
+    async (input?: { limit?: number; query?: string }): Promise<UserRecipe[]> => {
+      const params = new URLSearchParams();
+      if (typeof input?.limit === "number") {
+        params.set("limit", String(input.limit));
+      }
+      if (input?.query?.trim()) {
+        params.set("q", input.query.trim());
+      }
+      const suffix = params.toString() ? `?${params.toString()}` : "";
+      return request<UserRecipe[]>(`/recipes/mine${suffix}`);
+    },
+    [request],
+  );
+
+  const fetchRecipe = useCallback(
+    async (recipeId: number): Promise<UserRecipe> => request<UserRecipe>(`/recipes/${recipeId}`),
+    [request],
+  );
+
+  const createRecipe = useCallback(
+    async (payload: UserRecipePayload): Promise<UserRecipe> => {
+      return request<UserRecipe>("/recipes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+    },
+    [request],
+  );
+
+  const updateRecipe = useCallback(
+    async (recipeId: number, payload: UserRecipePayload): Promise<UserRecipe> => {
+      return request<UserRecipe>(`/recipes/${recipeId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+    },
+    [request],
+  );
+
+  const generateRecipe = useCallback(
+    async (payload: {
+      meal_type: RecipeMealType;
+      target_kcal?: number;
+      target_protein_g?: number;
+      target_fat_g?: number;
+      target_carbs_g?: number;
+      goal_mode?: GoalType;
+      use_only_ingredients: boolean;
+      allergies?: string[];
+      preferences?: string[];
+      available_ingredients: RecipeIngredientItem[];
+      allow_basic_pantry: boolean;
+      locale?: "es" | "en";
+    }): Promise<RecipeGenerateResponse> => {
+      return request<RecipeGenerateResponse>("/recipes/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+    },
+    [request],
+  );
+
+  const generateRecipeOptions = useCallback(
+    async (payload: {
+      meal_type: RecipeMealType;
+      target_kcal?: number;
+      target_protein_g?: number;
+      target_fat_g?: number;
+      target_carbs_g?: number;
+      goal_mode?: GoalType;
+      use_only_ingredients: boolean;
+      allergies?: string[];
+      preferences?: string[];
+      available_ingredients: RecipeIngredientItem[];
+      allow_basic_pantry: boolean;
+      locale?: "es" | "en";
+    }): Promise<RecipeAiOptionsResponse> => {
+      return request<RecipeAiOptionsResponse>("/recipes/ai/options", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+    },
+    [request],
+  );
+
+  const fetchRecipeAiDetail = useCallback(
+    async (payload: { generation_id: string; option_id: string }): Promise<RecipeAiDetailResponse> => {
+      return request<RecipeAiDetailResponse>("/recipes/ai/detail", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+    },
     [request],
   );
 
@@ -1931,6 +2503,226 @@ function AuthProvider({ children }: { children: import("react").ReactNode }) {
     [request],
   );
 
+  const searchSocialUsers = useCallback(
+    async (query: string, limit = 12): Promise<SocialSearchItem[]> => {
+      const trimmed = query.trim();
+      if (trimmed.length < 1) {
+        return [];
+      }
+      const response = await request<SocialSearchResponse>(`/social/users/search?q=${encodeURIComponent(trimmed)}&limit=${limit}`);
+      return response.items;
+    },
+    [request],
+  );
+
+  const fetchSocialOverview = useCallback(
+    async (): Promise<SocialOverview> => request<SocialOverview>("/social/friendships"),
+    [request],
+  );
+
+  const sendFriendRequest = useCallback(
+    async (targetUserId: number): Promise<SocialFriendRequest> => {
+      return request<SocialFriendRequest>("/social/friend-requests", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ target_user_id: targetUserId }),
+      });
+    },
+    [request],
+  );
+
+  const acceptFriendRequest = useCallback(
+    async (friendshipId: number): Promise<SocialFriendRequest> => {
+      return request<SocialFriendRequest>(`/social/friend-requests/${friendshipId}/accept`, {
+        method: "POST",
+      });
+    },
+    [request],
+  );
+
+  const rejectFriendRequest = useCallback(
+    async (friendshipId: number): Promise<SocialFriendRequest> => {
+      return request<SocialFriendRequest>(`/social/friends/requests/${friendshipId}/reject`, {
+        method: "POST",
+      });
+    },
+    [request],
+  );
+
+  const fetchSocialFeed = useCallback(
+    async (input?: {
+      cursor?: string | null;
+      limit?: number;
+      scope?: "feed" | "explore";
+      sort?: SocialFeedSort;
+      postType?: SocialFeedTypeFilter;
+    }): Promise<SocialFeedResponse> => {
+      const params = new URLSearchParams();
+      if (input?.cursor) {
+        params.set("cursor", input.cursor);
+      }
+      if (typeof input?.limit === "number") {
+        params.set("limit", String(input.limit));
+      }
+      if (input?.scope) {
+        params.set("scope", input.scope);
+      }
+      if (input?.sort) {
+        params.set("sort", input.sort);
+      }
+      if (input?.postType && input.postType !== "all") {
+        params.set("post_type", input.postType);
+      }
+      const suffix = params.toString() ? `?${params.toString()}` : "";
+      return request<SocialFeedResponse>(`/social/feed${suffix}`);
+    },
+    [request],
+  );
+
+  const fetchSocialProfile = useCallback(
+    async (input?: { userId?: number; cursor?: string | null; limit?: number }): Promise<SocialProfileResponse> => {
+      const params = new URLSearchParams();
+      if (input?.cursor) {
+        params.set("cursor", input.cursor);
+      }
+      if (typeof input?.limit === "number") {
+        params.set("limit", String(input.limit));
+      }
+      const suffix = params.toString() ? `?${params.toString()}` : "";
+      const path = input?.userId ? `/social/users/${input.userId}/posts${suffix}` : `/social/me/posts${suffix}`;
+      return request<SocialProfileResponse>(path);
+    },
+    [request],
+  );
+
+  const createSocialPost = useCallback(
+    async (payload: {
+      type: SocialPostType;
+      caption?: string;
+      visibility: SocialVisibility;
+      photos?: string[];
+      recipe?: SocialRecipePayload | null;
+      progress?: SocialProgressPayload | null;
+    }): Promise<SocialPost> => {
+      const form = new FormData();
+      form.append("type", payload.type);
+      form.append("visibility", payload.visibility);
+      if (payload.caption?.trim()) {
+        form.append("caption", payload.caption.trim());
+      }
+
+      if (payload.type === "recipe" && payload.recipe) {
+        form.append("recipe_title", payload.recipe.title.trim());
+        if (payload.recipe.servings != null) {
+          form.append("recipe_servings", String(payload.recipe.servings));
+        }
+        if (payload.recipe.prep_time_min != null) {
+          form.append("recipe_prep_time_min", String(payload.recipe.prep_time_min));
+        }
+        form.append("recipe_ingredients_json", JSON.stringify(payload.recipe.ingredients));
+        form.append("recipe_steps_json", JSON.stringify(payload.recipe.steps));
+        form.append("recipe_tags_json", JSON.stringify(payload.recipe.tags));
+        if (payload.recipe.nutrition_kcal != null) {
+          form.append("recipe_nutrition_kcal", String(payload.recipe.nutrition_kcal));
+        }
+        if (payload.recipe.nutrition_protein_g != null) {
+          form.append("recipe_nutrition_protein_g", String(payload.recipe.nutrition_protein_g));
+        }
+        if (payload.recipe.nutrition_carbs_g != null) {
+          form.append("recipe_nutrition_carbs_g", String(payload.recipe.nutrition_carbs_g));
+        }
+        if (payload.recipe.nutrition_fat_g != null) {
+          form.append("recipe_nutrition_fat_g", String(payload.recipe.nutrition_fat_g));
+        }
+      }
+
+      if (payload.type === "progress" && payload.progress) {
+        if (payload.progress.weight_kg != null) {
+          form.append("progress_weight_kg", String(payload.progress.weight_kg));
+        }
+        if (payload.progress.body_fat_pct != null) {
+          form.append("progress_body_fat_pct", String(payload.progress.body_fat_pct));
+        }
+        if (payload.progress.bmi != null) {
+          form.append("progress_bmi", String(payload.progress.bmi));
+        }
+        if (payload.progress.notes?.trim()) {
+          form.append("progress_notes", payload.progress.notes.trim());
+        }
+      }
+
+      const photos = payload.photos ?? [];
+      for (let index = 0; index < photos.length; index += 1) {
+        const uri = photos[index];
+        if (!uri) {
+          continue;
+        }
+        const fallbackName = uri.split("/").pop() || `social-${payload.type}-${index + 1}.jpg`;
+        await appendImageUriToFormData(form, "photos", uri, fallbackName);
+      }
+
+      return request<SocialPost>("/social/posts", {
+        method: "POST",
+        body: form,
+      });
+    },
+    [request],
+  );
+
+  const updateSocialPostVisibility = useCallback(
+    async (postId: string, visibility: SocialVisibility): Promise<SocialPost> => {
+      return request<SocialPost>(`/social/posts/${postId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ visibility }),
+      });
+    },
+    [request],
+  );
+
+  const deleteSocialPost = useCallback(
+    async (postId: string): Promise<void> => {
+      await request(`/social/posts/${postId}`, {
+        method: "DELETE",
+      });
+    },
+    [request],
+  );
+
+  const likeSocialPost = useCallback(
+    async (postId: string): Promise<SocialLikeToggleResponse> => {
+      return request<SocialLikeToggleResponse>(`/social/posts/${postId}/like`, {
+        method: "POST",
+      });
+    },
+    [request],
+  );
+
+  const unlikeSocialPost = useCallback(
+    async (postId: string): Promise<SocialLikeToggleResponse> => {
+      return request<SocialLikeToggleResponse>(`/social/posts/${postId}/like`, {
+        method: "DELETE",
+      });
+    },
+    [request],
+  );
+
+  const fetchSocialComments = useCallback(
+    async (postId: string): Promise<SocialComment[]> => request<SocialComment[]>(`/social/posts/${postId}/comments`),
+    [request],
+  );
+
+  const createSocialComment = useCallback(
+    async (postId: string, text: string): Promise<SocialComment> => {
+      return request<SocialComment>(`/social/posts/${postId}/comments`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+    },
+    [request],
+  );
+
   const value = useMemo<AuthContextValue>(
     () => ({
       loading,
@@ -1949,6 +2741,7 @@ function AuthProvider({ children }: { children: import("react").ReactNode }) {
       logout,
       refreshMe,
       saveProfile,
+      uploadProfileAvatar,
       fetchAnalysis,
       fetchGoal,
       saveGoal,
@@ -1965,6 +2758,13 @@ function AuthProvider({ children }: { children: import("react").ReactNode }) {
       createCommunityFood,
       searchFoods,
       fetchMyCommunityFoods,
+      fetchMyRecipes,
+      fetchRecipe,
+      createRecipe,
+      updateRecipe,
+      generateRecipe,
+      generateRecipeOptions,
+      fetchRecipeAiDetail,
       lookupByBarcode,
       createProductFromLabel,
       correctProductFromLabel,
@@ -1982,6 +2782,20 @@ function AuthProvider({ children }: { children: import("react").ReactNode }) {
       addFavoriteProduct,
       removeFavoriteProduct,
       repeatIntakesFromDay,
+      searchSocialUsers,
+      fetchSocialOverview,
+      sendFriendRequest,
+      acceptFriendRequest,
+      rejectFriendRequest,
+      fetchSocialFeed,
+      fetchSocialProfile,
+      createSocialPost,
+      updateSocialPostVisibility,
+      deleteSocialPost,
+      likeSocialPost,
+      unlikeSocialPost,
+      fetchSocialComments,
+      createSocialComment,
       setApiBaseUrl: (url: string) => setApiBaseUrl(normalizeBaseUrl(url)),
       checkHealth,
     }),
@@ -2015,6 +2829,13 @@ function AuthProvider({ children }: { children: import("react").ReactNode }) {
       fetchProductDataQuality,
       searchFoods,
       fetchMyCommunityFoods,
+      fetchMyRecipes,
+      fetchRecipe,
+      createRecipe,
+      updateRecipe,
+      generateRecipe,
+      generateRecipeOptions,
+      fetchRecipeAiDetail,
       fetchMeasurementLogs,
       fetchGoal,
       fetchWeightLogs,
@@ -2031,8 +2852,23 @@ function AuthProvider({ children }: { children: import("react").ReactNode }) {
       resendCode,
       saveGoal,
       saveProfile,
+      uploadProfileAvatar,
       removeFavoriteProduct,
       repeatIntakesFromDay,
+      searchSocialUsers,
+      fetchSocialOverview,
+      sendFriendRequest,
+      acceptFriendRequest,
+      rejectFriendRequest,
+      fetchSocialFeed,
+      fetchSocialProfile,
+      createSocialPost,
+      updateSocialPostVisibility,
+      deleteSocialPost,
+      likeSocialPost,
+      unlikeSocialPost,
+      fetchSocialComments,
+      createSocialComment,
       token,
       user,
       verifyEmail,
@@ -2248,11 +3084,30 @@ function InputField(props: {
   secureTextEntry?: boolean;
   autoCapitalize?: "none" | "sentences" | "words" | "characters";
   placeholder?: string;
+  editable?: boolean;
+  autoFocus?: boolean;
+  returnKeyType?: TextInputProps["returnKeyType"];
+  onSubmitEditing?: TextInputProps["onSubmitEditing"];
+  inputMode?: TextInputProps["inputMode"];
+  helperText?: string;
+  invalid?: boolean;
+  accentColor?: string;
+  containerStyle?: ViewStyle;
+  labelStyle?: TextStyle;
+  inputStyle?: TextStyle;
 }) {
   const [focused, setFocused] = useState(false);
+  const borderColor = props.invalid
+    ? theme.danger
+    : focused
+      ? props.accentColor ?? theme.inputFocusBorder
+      : theme.inputBorder;
   return (
-    <View style={styles.fieldWrap}>
-      <Text style={styles.fieldLabel}>{props.label}</Text>
+    <View style={[styles.fieldWrap, props.containerStyle]}>
+      <View style={styles.fieldLabelRow}>
+        {props.accentColor ? <View style={[styles.fieldLabelDot, { backgroundColor: props.accentColor }]} /> : null}
+        <Text style={[styles.fieldLabel, props.labelStyle]}>{props.label}</Text>
+      </View>
       <TextInput
         value={props.value}
         onChangeText={props.onChangeText}
@@ -2261,10 +3116,16 @@ function InputField(props: {
         autoCapitalize={props.autoCapitalize ?? "none"}
         placeholder={props.placeholder}
         placeholderTextColor={theme.placeholder}
-        style={[styles.input, focused && styles.inputFocused]}
+        editable={props.editable ?? true}
+        autoFocus={props.autoFocus}
+        returnKeyType={props.returnKeyType}
+        onSubmitEditing={props.onSubmitEditing}
+        inputMode={props.inputMode}
+        style={[styles.input, props.inputStyle, { borderColor }, focused && styles.inputFocused, props.invalid && styles.inputInvalid]}
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
       />
+      {props.helperText ? <Text style={[styles.fieldHelperText, props.invalid && styles.fieldHelperTextInvalid]}>{props.helperText}</Text> : null}
     </View>
   );
 }
@@ -2280,7 +3141,15 @@ function ReadOnlyField(props: { label: string; value: string }) {
   );
 }
 
-function PrimaryButton(props: { title: string; onPress: () => void; loading?: boolean; disabled?: boolean }) {
+function PrimaryButton(props: {
+  title: string;
+  onPress: () => void;
+  loading?: boolean;
+  disabled?: boolean;
+  loadingTitle?: string;
+  style?: ViewStyle;
+  textStyle?: TextStyle;
+}) {
   const [hovered, setHovered] = useState(false);
   const disabled = props.disabled || props.loading;
   return (
@@ -2291,12 +3160,22 @@ function PrimaryButton(props: { title: string; onPress: () => void; loading?: bo
       onHoverOut={() => setHovered(false)}
       style={({ pressed }) => [
         styles.primaryButton,
+        props.style,
         hovered && !disabled && styles.primaryButtonHover,
         pressed && !disabled && styles.primaryButtonPressed,
         disabled && styles.disabledButton,
       ]}
     >
-      {props.loading ? <ActivityIndicator color={theme.bg} /> : <Text style={styles.primaryButtonText}>{props.title}</Text>}
+      {props.loading ? (
+        <View style={styles.buttonLoadingContent}>
+          <ActivityIndicator color={theme.bg} />
+          <Text style={[styles.primaryButtonText, styles.buttonLoadingText, props.textStyle]}>
+            {props.loadingTitle ?? props.title}
+          </Text>
+        </View>
+      ) : (
+        <Text style={[styles.primaryButtonText, props.textStyle]}>{props.title}</Text>
+      )}
     </Pressable>
   );
 }
@@ -2421,10 +3300,32 @@ function StatRow(props: { label: string; value: string }) {
   );
 }
 
-function AvatarCircle({ letter }: { letter: string }) {
+function AvatarCircle({ letter, imageUrl, size = 36 }: { letter: string; imageUrl?: string | null; size?: number }) {
   return (
-    <View style={styles.avatarCircle}>
-      <Text style={styles.avatarText}>{letter.slice(0, 1).toUpperCase()}</Text>
+    <View
+      style={[
+        styles.avatarCircle,
+        {
+          width: size,
+          height: size,
+          borderRadius: size / 2,
+        },
+      ]}
+    >
+      {imageUrl ? (
+        <Image
+          source={{ uri: imageUrl }}
+          style={{
+            width: size - 2,
+            height: size - 2,
+            borderRadius: (size - 2) / 2,
+          }}
+        />
+      ) : (
+        <Text style={[styles.avatarText, { fontSize: Math.max(13, Math.round(size * 0.36)) }]}>
+          {letter.slice(0, 1).toUpperCase()}
+        </Text>
+      )}
     </View>
   );
 }
@@ -3468,8 +4369,10 @@ function mealPrecisionMeta(
 }
 
 function DashboardScreen({
+  isActive,
   onOpenBodyProgress,
 }: {
+  isActive: boolean;
   onOpenBodyProgress: () => void;
 }) {
   const { width } = useWindowDimensions();
@@ -3502,6 +4405,13 @@ function DashboardScreen({
   useEffect(() => {
     void loadSummary();
   }, [loadSummary]);
+
+  useEffect(() => {
+    if (!isActive) {
+      return;
+    }
+    void loadSummary();
+  }, [isActive, loadSummary]);
 
   const openAccountMenu = useCallback(() => {
     if (accountMenuOpen) {
@@ -3845,7 +4755,7 @@ function DashboardScreen({
               onPress={toggleAccountMenu}
               style={({ pressed }) => [styles.avatarPressable, pressed && styles.avatarPressablePressed]}
             >
-              <AvatarCircle letter={displayName.slice(0, 1)} />
+              <AvatarCircle letter={displayName.slice(0, 1)} imageUrl={auth.user?.avatar_url} />
             </Pressable>
           ) : null}
         </View>
@@ -4042,11 +4952,45 @@ function BodyProgressScreen() {
     return { min: Math.min(...values), max: Math.max(...values) };
   }, [filteredBodyFatPoints]);
 
+  const confirmSuspiciousBodyChange = useCallback(
+    (title: string, message: string) =>
+      new Promise<boolean>((resolve) => {
+        showAlert(title, message, [
+          {
+            text: "Revisar",
+            style: "cancel",
+            onPress: () => resolve(false),
+          },
+          {
+            text: "Sí, guardar",
+            style: "default",
+            onPress: () => resolve(true),
+          },
+        ]);
+      }),
+    [],
+  );
+
   const saveWeight = async () => {
     const value = toPositiveNumberOrNull(weightInput);
     if (!value) {
       showAlert("Peso", "Introduce un peso válido.");
       return;
+    }
+    const previousWeight = summary?.latest_weight_kg ?? auth.profile?.weight_kg ?? null;
+    if (previousWeight != null) {
+      const delta = Math.abs(value - previousWeight);
+      if (delta >= 8) {
+        const confirmed = await confirmSuspiciousBodyChange(
+          "Peso",
+          `Vas a pasar de ${previousWeight.toFixed(1)} kg a ${value.toFixed(1)} kg. Son ${delta.toFixed(
+            1,
+          )} kg de golpe. Si no has descubierto la teletransportación corporal, igual conviene revisar el número.`,
+        );
+        if (!confirmed) {
+          return;
+        }
+      }
     }
     setSavingWeight(true);
     try {
@@ -4073,6 +5017,35 @@ function BodyProgressScreen() {
     if (!payload.waist_cm && !payload.neck_cm && !payload.hip_cm) {
       showAlert("Medidas", "Añade al menos una medida.");
       return;
+    }
+    const lastMeasurement = measurementLogs[0];
+    const suspiciousChanges: string[] = [];
+    if (payload.waist_cm != null && lastMeasurement?.waist_cm != null) {
+      const delta = Math.abs(payload.waist_cm - lastMeasurement.waist_cm);
+      if (delta >= 12) {
+        suspiciousChanges.push(`cintura de ${lastMeasurement.waist_cm.toFixed(1)} a ${payload.waist_cm.toFixed(1)} cm`);
+      }
+    }
+    if (payload.neck_cm != null && lastMeasurement?.neck_cm != null) {
+      const delta = Math.abs(payload.neck_cm - lastMeasurement.neck_cm);
+      if (delta >= 8) {
+        suspiciousChanges.push(`cuello de ${lastMeasurement.neck_cm.toFixed(1)} a ${payload.neck_cm.toFixed(1)} cm`);
+      }
+    }
+    if (payload.hip_cm != null && lastMeasurement?.hip_cm != null) {
+      const delta = Math.abs(payload.hip_cm - lastMeasurement.hip_cm);
+      if (delta >= 12) {
+        suspiciousChanges.push(`cadera de ${lastMeasurement.hip_cm.toFixed(1)} a ${payload.hip_cm.toFixed(1)} cm`);
+      }
+    }
+    if (suspiciousChanges.length > 0) {
+      const confirmed = await confirmSuspiciousBodyChange(
+        "Medidas",
+        `Hay un cambio bastante salvaje en ${suspiciousChanges.join(", ")}. Si no te ha abducido un metro de costura travieso, revisa los valores antes de guardarlos.`,
+      );
+      if (!confirmed) {
+        return;
+      }
     }
     setSavingMeasure(true);
     try {
@@ -4439,19 +5412,6 @@ function BodyProgressScreen() {
           ) : null}
         </AppCard>
 
-        <AppCard style={useDesktopLayout ? [styles.desktopSectionGridItem, useWideDesktopLayout && styles.desktopSectionGridItemWide] : undefined}>
-          <SectionHeader title="Consejos" subtitle="Reglas simples basadas en tu día" />
-          {(summary?.hints ?? []).length === 0 ? (
-            <EmptyState title="Sin alertas" subtitle="Tus métricas actuales no generan avisos." />
-          ) : (
-            (summary?.hints ?? []).map((hint) => (
-              <View key={hint} style={styles.insightRow}>
-                <View style={styles.insightDot} />
-                <Text style={styles.helperText}>{hint}</Text>
-              </View>
-            ))
-          )}
-        </AppCard>
         </View>
         </ScrollView>
       </SafeAreaView>
@@ -4543,7 +5503,7 @@ function BodyProgressScreen() {
   );
 }
 
-function HistoryScreen() {
+function HistoryScreen({ isActive }: { isActive: boolean }) {
   const { width } = useWindowDimensions();
   const auth = useAuth();
   const { language } = useI18n();
@@ -4592,6 +5552,13 @@ function HistoryScreen() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (!isActive) {
+      return;
+    }
+    void load();
+  }, [isActive, load]);
 
   useEffect(() => {
     if (!selectedDay) {
@@ -4976,6 +5943,1818 @@ function HistoryScreen() {
         </View>
       </ScrollView>
     </SafeAreaView>
+  );
+}
+
+type SocialSegmentTab = "feed" | "explore" | "friends" | "requests";
+
+type SocialFeedState = {
+  items: SocialPost[];
+  nextCursor: string | null;
+  loading: boolean;
+  loaded: boolean;
+  refreshing: boolean;
+  loadingMore: boolean;
+  error: string | null;
+};
+
+type SocialProfileState = {
+  user: SocialUser | null;
+  is_me: boolean;
+  is_friend: boolean;
+  outgoing_request_pending: boolean;
+  incoming_request_pending: boolean;
+  posts_count: number;
+  friends_count: number;
+  items: SocialPost[];
+  next_cursor: string | null;
+  loading: boolean;
+  loaded: boolean;
+  refreshing: boolean;
+  loadingMore: boolean;
+  error: string | null;
+};
+
+function SocialFeedSkeleton(props: { count?: number }) {
+  const rows = Array.from({ length: props.count ?? 3 }, (_, index) => index);
+  return (
+    <View style={styles.socialSkeletonList}>
+      {rows.map((row) => (
+        <AppCard key={`social-skeleton-${row}`} style={styles.socialPostCard}>
+          <View style={styles.socialSkeletonHeader}>
+            <View style={styles.socialSkeletonAvatar} />
+            <View style={styles.socialSkeletonHeaderCopy}>
+              <View style={styles.skeletonLineMd} />
+              <View style={styles.skeletonLineSm} />
+            </View>
+          </View>
+          <View style={styles.socialSkeletonMedia} />
+          <View style={styles.skeletonLineLg} />
+          <View style={styles.skeletonLineMd} />
+          <View style={styles.socialSkeletonActions}>
+            <View style={styles.socialSkeletonActionPill} />
+            <View style={styles.socialSkeletonActionPill} />
+            <View style={styles.socialSkeletonActionPill} />
+          </View>
+        </AppCard>
+      ))}
+    </View>
+  );
+}
+
+function EditableStringListField(props: {
+  label: string;
+  items: string[];
+  placeholder: string;
+  addLabel: string;
+  onChange: (items: string[]) => void;
+}) {
+  const updateItem = (index: number, value: string) => {
+    const next = [...props.items];
+    next[index] = value;
+    props.onChange(next);
+  };
+
+  const removeItem = (index: number) => {
+    if (props.items.length <= 1) {
+      props.onChange([""]);
+      return;
+    }
+    props.onChange(props.items.filter((_, itemIndex) => itemIndex !== index));
+  };
+
+  return (
+    <View style={styles.fieldWrap}>
+      <Text style={styles.fieldLabel}>{props.label}</Text>
+      <View style={styles.socialEditableList}>
+        {props.items.map((item, index) => (
+          <View key={`${props.label}-${index}`} style={styles.socialEditableRow}>
+            <TextInput
+              value={item}
+              onChangeText={(value) => updateItem(index, value)}
+              placeholder={props.placeholder}
+              style={[styles.input, styles.socialEditableInput]}
+            />
+            <Pressable style={styles.socialInlineRemoveBtn} onPress={() => removeItem(index)}>
+              <Text style={styles.socialInlineRemoveText}>Quitar</Text>
+            </Pressable>
+          </View>
+        ))}
+      </View>
+      <Pressable style={styles.socialInlineAddBtn} onPress={() => props.onChange([...props.items, ""])}>
+        <Text style={styles.socialInlineAddText}>{props.addLabel}</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+function SocialPostCard(props: {
+  post: SocialPost;
+  onOpenProfile: (user: SocialUser) => void;
+  onToggleLike: (post: SocialPost) => void;
+  onOpenComments: (post: SocialPost) => void;
+  onShare: (post: SocialPost) => void;
+  onManagePost?: (post: SocialPost) => void;
+  canManage?: boolean;
+}) {
+  const { width } = useWindowDimensions();
+  const useDesktopLayout = isDesktopWebLayout(width);
+  const mediaViewportWidth = useDesktopLayout ? Math.min(width - 120, 700) : Math.max(280, width - 40);
+  const mediaHeight = useDesktopLayout ? 360 : 260;
+  const typeMeta = socialTypeMeta(props.post.type);
+  const [expandedCaption, setExpandedCaption] = useState(false);
+  const caption = props.post.caption?.trim() ?? "";
+  const showExpand = caption.length > 180;
+
+  return (
+    <AppCard style={[styles.socialPostCard, { borderColor: typeMeta.borderColor, backgroundColor: typeMeta.softBackground }]}>
+      <View style={styles.socialPostHeader}>
+        <Pressable style={styles.socialPostUserWrap} onPress={() => props.onOpenProfile(props.post.user)}>
+          <AvatarCircle letter={props.post.user.username} imageUrl={props.post.user.avatar_url} />
+          <View style={styles.socialPostUserCopy}>
+            <Text style={styles.socialPostUserName}>@{props.post.user.username}</Text>
+            <Text style={styles.socialPostMeta}>
+              {formatRelativeTime(props.post.created_at)} · {props.post.source === "friends" ? "Amigos" : props.post.source === "self" ? "Tú" : "Explorar"}
+            </Text>
+          </View>
+        </Pressable>
+        <View style={styles.socialPostHeaderRight}>
+          <View style={styles.socialPostBadges}>
+            <View style={[styles.socialTypeBadge, { backgroundColor: typeMeta.softBackground, borderColor: typeMeta.borderColor }]}>
+              <Text style={[styles.socialTypeBadgeText, { color: typeMeta.color }]}>{socialTypeLabel(props.post.type)}</Text>
+            </View>
+            <TagChip label={socialVisibilityLabel(props.post.visibility)} tone="default" />
+          </View>
+          {props.canManage && props.onManagePost ? (
+            <Pressable style={styles.socialPostManageButton} onPress={() => props.onManagePost?.(props.post)}>
+              <Text style={styles.socialPostManageButtonText}>⋯</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      </View>
+
+      {props.post.media.length ? (
+        <ScrollView
+          horizontal
+          pagingEnabled
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.socialMediaCarousel}
+        >
+          {props.post.media.map((media) => (
+            <Image
+              key={`${props.post.id}-${media.id}`}
+              source={{ uri: media.media_url }}
+              style={[
+                styles.socialMediaImage,
+                {
+                  width: mediaViewportWidth,
+                  height: mediaHeight,
+                },
+              ]}
+            />
+          ))}
+        </ScrollView>
+      ) : null}
+
+      {caption ? (
+        <View style={styles.socialCaptionWrap}>
+          <Text style={styles.socialCaptionText} numberOfLines={expandedCaption ? undefined : 3}>
+            {caption}
+          </Text>
+          {showExpand ? (
+            <Pressable style={styles.socialCaptionToggle} onPress={() => setExpandedCaption((current) => !current)}>
+              <Text style={styles.socialCaptionToggleText}>{expandedCaption ? "Ver menos" : "Ver más"}</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      ) : null}
+
+      {props.post.type === "recipe" && props.post.recipe ? (
+        <View style={styles.socialRecipeCard}>
+          <View style={styles.socialRecipeHeader}>
+            <Text style={styles.socialRecipeTitle}>{props.post.recipe.title}</Text>
+            <View style={styles.socialMiniMetaRow}>
+              {props.post.recipe.servings ? <TagChip label={`${props.post.recipe.servings} raciones`} tone="default" /> : null}
+              {props.post.recipe.prep_time_min ? <TagChip label={`${props.post.recipe.prep_time_min} min`} tone="default" /> : null}
+            </View>
+          </View>
+          {props.post.recipe.ingredients.length ? (
+            <View style={styles.socialRecipeListBlock}>
+              <Text style={styles.socialRecipeListTitle}>Ingredientes</Text>
+              {props.post.recipe.ingredients.slice(0, 4).map((ingredient, index) => (
+                <Text key={`ingredient-${props.post.id}-${index}`} style={styles.socialRecipeListText}>
+                  • {ingredient}
+                </Text>
+              ))}
+              {props.post.recipe.ingredients.length > 4 ? (
+                <Text style={styles.socialRecipeListMore}>+{props.post.recipe.ingredients.length - 4} más</Text>
+              ) : null}
+            </View>
+          ) : null}
+          {props.post.recipe.steps.length ? (
+            <View style={styles.socialRecipeListBlock}>
+              <Text style={styles.socialRecipeListTitle}>Pasos</Text>
+              {props.post.recipe.steps.slice(0, 2).map((step, index) => (
+                <Text key={`step-${props.post.id}-${index}`} style={styles.socialRecipeListText}>
+                  {index + 1}. {step}
+                </Text>
+              ))}
+            </View>
+          ) : null}
+          {props.post.recipe.nutrition_kcal != null &&
+          props.post.recipe.nutrition_protein_g != null &&
+          props.post.recipe.nutrition_carbs_g != null &&
+          props.post.recipe.nutrition_fat_g != null ? (
+            <View style={styles.socialRecipeMacroSummary}>
+              <AddQuantityMacroSummary
+                kcal={props.post.recipe.nutrition_kcal}
+                protein={props.post.recipe.nutrition_protein_g}
+                carbs={props.post.recipe.nutrition_carbs_g}
+                fats={props.post.recipe.nutrition_fat_g}
+              />
+            </View>
+          ) : null}
+        </View>
+      ) : null}
+
+      {props.post.type === "progress" && props.post.progress ? (
+        <View style={styles.socialProgressGrid}>
+          <MetricCard label="Peso" value={props.post.progress.weight_kg != null ? `${props.post.progress.weight_kg.toFixed(1)} kg` : "-"} />
+          <MetricCard label="IMC" value={props.post.progress.bmi != null ? props.post.progress.bmi.toFixed(1) : "-"} />
+          <MetricCard
+            label="% grasa"
+            value={props.post.progress.body_fat_pct != null ? `${props.post.progress.body_fat_pct.toFixed(1)}%` : "-"}
+          />
+          <MetricCard label="Visibilidad" value={socialVisibilityLabel(props.post.visibility)} />
+          {props.post.progress.notes ? (
+            <View style={styles.socialProgressNotes}>
+              <Text style={styles.socialProgressNotesText}>{props.post.progress.notes}</Text>
+            </View>
+          ) : null}
+        </View>
+      ) : null}
+
+      <View style={styles.socialActionRow}>
+        <Pressable style={styles.socialActionPill} onPress={() => props.onToggleLike(props.post)}>
+          <Text style={[styles.socialActionPillIcon, props.post.liked_by_me && styles.socialActionPillIconActive]}>♥</Text>
+          <Text style={styles.socialActionPillText}>{props.post.like_count}</Text>
+        </Pressable>
+        <Pressable style={styles.socialActionPill} onPress={() => props.onOpenComments(props.post)}>
+          <Text style={styles.socialActionPillIcon}>💬</Text>
+          <Text style={styles.socialActionPillText}>{props.post.comment_count}</Text>
+        </Pressable>
+        <Pressable style={styles.socialActionPill} onPress={() => props.onShare(props.post)}>
+          <Text style={styles.socialActionPillIcon}>↗</Text>
+          <Text style={styles.socialActionPillText}>Compartir</Text>
+        </Pressable>
+      </View>
+    </AppCard>
+  );
+}
+
+function SocialScreen() {
+  const { width } = useWindowDimensions();
+  const auth = useAuth();
+  const useDesktopLayout = isDesktopWebLayout(width);
+  const webMainScrollStyle = useMemo(() => webMainContentContainerStyle(width), [width]);
+
+  const emptyFeedState = useCallback(
+    (): SocialFeedState => ({
+      items: [],
+      nextCursor: null,
+      loading: false,
+      loaded: false,
+      refreshing: false,
+      loadingMore: false,
+      error: null,
+    }),
+    [],
+  );
+
+  const emptyProfileState = useCallback(
+    (): SocialProfileState => ({
+      user: null,
+      is_me: false,
+      is_friend: false,
+      outgoing_request_pending: false,
+      incoming_request_pending: false,
+      posts_count: 0,
+      friends_count: 0,
+      items: [],
+      next_cursor: null,
+      loading: false,
+      loaded: false,
+      refreshing: false,
+      loadingMore: false,
+      error: null,
+    }),
+    [],
+  );
+
+  const [segment, setSegment] = useState<SocialSegmentTab>("feed");
+  const [feedSort, setFeedSort] = useState<SocialFeedSort>("relevance");
+  const [feedTypeFilter, setFeedTypeFilter] = useState<SocialFeedTypeFilter>("all");
+  const [feedFilterMenu, setFeedFilterMenu] = useState<null | "sort" | "type">(null);
+  const [feedState, setFeedState] = useState<SocialFeedState>(() => emptyFeedState());
+  const [exploreState, setExploreState] = useState<SocialFeedState>(() => emptyFeedState());
+  const [socialOverview, setSocialOverview] = useState<SocialOverview>({
+    friends: [],
+    incoming_requests: [],
+    outgoing_requests: [],
+  });
+  const [loadingOverview, setLoadingOverview] = useState(false);
+  const [overviewLoaded, setOverviewLoaded] = useState(false);
+  const [socialSearch, setSocialSearch] = useState("");
+  const [socialResults, setSocialResults] = useState<SocialSearchItem[]>([]);
+  const [searchingSocial, setSearchingSocial] = useState(false);
+  const [sendingFriendUserId, setSendingFriendUserId] = useState<number | null>(null);
+  const [respondingFriendRequestId, setRespondingFriendRequestId] = useState<number | null>(null);
+  const [selectedProfile, setSelectedProfile] = useState<SocialUser | null>(null);
+  const [profileState, setProfileState] = useState<SocialProfileState>(() => emptyProfileState());
+  const [composerVisible, setComposerVisible] = useState(false);
+  const [composerType, setComposerType] = useState<SocialPostType>("photo");
+  const [composerCaption, setComposerCaption] = useState("");
+  const [composerVisibility, setComposerVisibility] = useState<SocialVisibility>("friends");
+  const [composerPhotos, setComposerPhotos] = useState<string[]>([]);
+  const [composerRecipeTitle, setComposerRecipeTitle] = useState("");
+  const [composerRecipeServings, setComposerRecipeServings] = useState("");
+  const [composerRecipePrepTime, setComposerRecipePrepTime] = useState("");
+  const [composerRecipeIngredients, setComposerRecipeIngredients] = useState<string[]>([""]);
+  const [composerRecipeSteps, setComposerRecipeSteps] = useState<string[]>([""]);
+  const [composerRecipeTags, setComposerRecipeTags] = useState("");
+  const [composerRecipeKcal, setComposerRecipeKcal] = useState("");
+  const [composerRecipeProtein, setComposerRecipeProtein] = useState("");
+  const [composerRecipeCarbs, setComposerRecipeCarbs] = useState("");
+  const [composerRecipeFat, setComposerRecipeFat] = useState("");
+  const [composerProgressWeight, setComposerProgressWeight] = useState("");
+  const [composerProgressBodyFat, setComposerProgressBodyFat] = useState("");
+  const [composerProgressBmi, setComposerProgressBmi] = useState("");
+  const [composerProgressNotes, setComposerProgressNotes] = useState("");
+  const [publishingPost, setPublishingPost] = useState(false);
+  const [commentsPost, setCommentsPost] = useState<SocialPost | null>(null);
+  const [commentsVisible, setCommentsVisible] = useState(false);
+  const [commentsLoading, setCommentsLoading] = useState(false);
+  const [commentsItems, setCommentsItems] = useState<SocialComment[]>([]);
+  const [commentDraft, setCommentDraft] = useState("");
+  const [sendingComment, setSendingComment] = useState(false);
+
+  const requestBadgeCount = socialOverview.incoming_requests.length;
+  const activeFeedScope = segment === "explore" ? "explore" : "feed";
+  const activeFeedState = activeFeedScope === "explore" ? exploreState : feedState;
+
+  const mergePosts = useCallback((current: SocialPost[], incoming: SocialPost[]): SocialPost[] => {
+    const ordered: SocialPost[] = [];
+    const indexById = new Map<string, number>();
+    [...current, ...incoming].forEach((post) => {
+      const existingIndex = indexById.get(post.id);
+      if (existingIndex == null) {
+        indexById.set(post.id, ordered.length);
+        ordered.push(post);
+        return;
+      }
+      ordered[existingIndex] = post;
+    });
+    return ordered;
+  }, []);
+
+  const updateScopedFeedState = useCallback(
+    (scope: "feed" | "explore", updater: (current: SocialFeedState) => SocialFeedState) => {
+      if (scope === "feed") {
+        setFeedState(updater);
+        return;
+      }
+      setExploreState(updater);
+    },
+    [],
+  );
+
+  const applyPostUpdateEverywhere = useCallback((postId: string, updater: (post: SocialPost) => SocialPost) => {
+    setFeedState((current) => ({
+      ...current,
+      items: current.items.map((item) => (item.id === postId ? updater(item) : item)),
+    }));
+    setExploreState((current) => ({
+      ...current,
+      items: current.items.map((item) => (item.id === postId ? updater(item) : item)),
+    }));
+    setProfileState((current) => ({
+      ...current,
+      items: current.items.map((item) => (item.id === postId ? updater(item) : item)),
+    }));
+    setCommentsPost((current) => (current && current.id === postId ? updater(current) : current));
+  }, []);
+
+  const removePostEverywhere = useCallback((postId: string) => {
+    setFeedState((current) => ({
+      ...current,
+      items: current.items.filter((item) => item.id !== postId),
+    }));
+    setExploreState((current) => ({
+      ...current,
+      items: current.items.filter((item) => item.id !== postId),
+    }));
+    setProfileState((current) => ({
+      ...current,
+      items: current.items.filter((item) => item.id !== postId),
+      posts_count: Math.max(0, current.posts_count - 1),
+    }));
+    setCommentsPost((current) => (current?.id === postId ? null : current));
+  }, []);
+
+  const resetComposer = useCallback(
+    (nextType: SocialPostType = "photo") => {
+      setComposerType(nextType);
+      setComposerCaption("");
+      setComposerVisibility("friends");
+      setComposerPhotos([]);
+      setComposerRecipeTitle("");
+      setComposerRecipeServings("");
+      setComposerRecipePrepTime("");
+      setComposerRecipeIngredients([""]);
+      setComposerRecipeSteps([""]);
+      setComposerRecipeTags("");
+      setComposerRecipeKcal("");
+      setComposerRecipeProtein("");
+      setComposerRecipeCarbs("");
+      setComposerRecipeFat("");
+      setComposerProgressWeight(auth.profile?.weight_kg != null ? auth.profile.weight_kg.toFixed(1) : "");
+      setComposerProgressBodyFat(auth.profile?.body_fat_percent != null ? auth.profile.body_fat_percent.toFixed(1) : "");
+      setComposerProgressBmi(auth.profile?.bmi != null ? auth.profile.bmi.toFixed(1) : "");
+      setComposerProgressNotes("");
+    },
+    [auth.profile],
+  );
+
+  const openComposer = useCallback(
+    (nextType: SocialPostType = "photo") => {
+      resetComposer(nextType);
+      setComposerVisible(true);
+    },
+    [resetComposer],
+  );
+
+  const closeComposer = useCallback(() => {
+    setComposerVisible(false);
+  }, []);
+
+  const closeFeedFilterMenu = useCallback(() => {
+    setFeedFilterMenu(null);
+  }, []);
+
+  const loadOverview = useCallback(async () => {
+    setLoadingOverview(true);
+    try {
+      const overview = await auth.fetchSocialOverview();
+      setSocialOverview(overview);
+      setOverviewLoaded(true);
+    } catch (error) {
+      showAlert("Social", parseApiError(error));
+    } finally {
+      setLoadingOverview(false);
+    }
+  }, [auth]);
+
+  const loadFeed = useCallback(
+    async (scope: "feed" | "explore", mode: "initial" | "refresh" | "more" = "initial") => {
+      const current = scope === "feed" ? feedState : exploreState;
+      if (mode === "more") {
+        if (!current.nextCursor || current.loadingMore || current.loading) {
+          return;
+        }
+      } else if (current.loading) {
+        return;
+      }
+
+      updateScopedFeedState(scope, (state) => ({
+        ...state,
+        loading: mode === "initial",
+        refreshing: mode === "refresh",
+        loadingMore: mode === "more",
+        error: null,
+      }));
+
+      try {
+        const response = await auth.fetchSocialFeed({
+          scope,
+          limit: 8,
+          cursor: mode === "more" ? current.nextCursor : undefined,
+          sort: feedSort,
+          postType: feedTypeFilter,
+        });
+        updateScopedFeedState(scope, (state) => ({
+          ...state,
+          items: mode === "more" ? mergePosts(state.items, response.items) : response.items,
+          nextCursor: response.next_cursor,
+          loading: false,
+          refreshing: false,
+          loadingMore: false,
+          loaded: true,
+          error: null,
+        }));
+      } catch (error) {
+        const message = parseApiError(error);
+        updateScopedFeedState(scope, (state) => ({
+          ...state,
+          loading: false,
+          refreshing: false,
+          loadingMore: false,
+          loaded: true,
+          error: message,
+        }));
+      }
+    },
+    [auth, exploreState, feedSort, feedState, feedTypeFilter, mergePosts, updateScopedFeedState],
+  );
+
+  const loadProfile = useCallback(
+    async (mode: "initial" | "refresh" | "more" = "initial") => {
+      if (!selectedProfile) {
+        return;
+      }
+      if (mode === "more" && (!profileState.next_cursor || profileState.loadingMore || profileState.loading)) {
+        return;
+      }
+      setProfileState((current) => ({
+        ...current,
+        loading: mode === "initial",
+        refreshing: mode === "refresh",
+        loadingMore: mode === "more",
+        error: null,
+      }));
+      try {
+        const response = await auth.fetchSocialProfile({
+          userId: selectedProfile.id,
+          limit: 8,
+          cursor: mode === "more" ? profileState.next_cursor : undefined,
+        });
+        setProfileState((current) => ({
+          ...current,
+          user: response.user,
+          is_me: response.is_me,
+          is_friend: response.is_friend,
+          outgoing_request_pending: response.outgoing_request_pending,
+          incoming_request_pending: response.incoming_request_pending,
+          posts_count: response.posts_count,
+          friends_count: response.friends_count,
+          items: mode === "more" ? mergePosts(current.items, response.items) : response.items,
+          next_cursor: response.next_cursor,
+          loading: false,
+          loaded: true,
+          refreshing: false,
+          loadingMore: false,
+          error: null,
+        }));
+      } catch (error) {
+        setProfileState((current) => ({
+          ...current,
+          loading: false,
+          refreshing: false,
+          loadingMore: false,
+          loaded: true,
+          error: parseApiError(error),
+        }));
+      }
+    },
+    [auth, mergePosts, profileState.loading, profileState.loadingMore, profileState.next_cursor, selectedProfile],
+  );
+
+  useEffect(() => {
+    if (!feedState.loaded && !feedState.loading) {
+      void loadFeed("feed");
+    }
+  }, [feedState.loaded, feedState.loading, loadFeed]);
+
+  useEffect(() => {
+    if ((segment === "friends" || segment === "requests") && !overviewLoaded && !loadingOverview) {
+      void loadOverview();
+    }
+    if (segment === "explore" && !exploreState.loaded && !exploreState.loading) {
+      void loadFeed("explore");
+    }
+  }, [exploreState.loaded, exploreState.loading, loadFeed, loadOverview, loadingOverview, overviewLoaded, segment]);
+
+  useEffect(() => {
+    if (!selectedProfile || profileState.loaded || profileState.loading) {
+      return;
+    }
+    void loadProfile();
+  }, [loadProfile, profileState.loaded, profileState.loading, selectedProfile]);
+
+  useEffect(() => {
+    setFeedState(emptyFeedState());
+    setExploreState(emptyFeedState());
+  }, [emptyFeedState, feedSort, feedTypeFilter]);
+
+  useEffect(() => {
+    if (segment !== "feed" && segment !== "explore") {
+      setFeedFilterMenu(null);
+    }
+  }, [segment]);
+
+  useEffect(() => {
+    if (segment !== "friends" || socialSearch.trim().length < 1) {
+      if (socialSearch.trim().length < 1) {
+        setSocialResults([]);
+        setSearchingSocial(false);
+      }
+      return;
+    }
+
+    setSearchingSocial(true);
+    const timeoutId = setTimeout(() => {
+      void auth
+        .searchSocialUsers(socialSearch.trim())
+        .then((items) => setSocialResults(items))
+        .catch((error) => showAlert("Social", parseApiError(error)))
+        .finally(() => setSearchingSocial(false));
+    }, 140);
+
+    return () => clearTimeout(timeoutId);
+  }, [auth, segment, socialSearch]);
+
+  const refreshSearchIfNeeded = useCallback(async () => {
+    const trimmed = socialSearch.trim();
+    if (segment !== "friends" || trimmed.length < 1) {
+      return;
+    }
+    const items = await auth.searchSocialUsers(trimmed);
+    setSocialResults(items);
+  }, [auth, segment, socialSearch]);
+
+  const openProfile = useCallback(
+    (user: SocialUser) => {
+      setSelectedProfile(user);
+      setProfileState(emptyProfileState());
+    },
+    [emptyProfileState],
+  );
+
+  const closeProfile = useCallback(() => {
+    setSelectedProfile(null);
+    setProfileState(emptyProfileState());
+  }, [emptyProfileState]);
+
+  const handleSendFriendRequest = useCallback(
+    async (targetUserId: number) => {
+      setSendingFriendUserId(targetUserId);
+      try {
+        await auth.sendFriendRequest(targetUserId);
+        await Promise.all([loadOverview(), refreshSearchIfNeeded()]);
+        if (selectedProfile?.id === targetUserId) {
+          await loadProfile("refresh");
+        }
+        showAlert("Social", "Solicitud enviada.");
+      } catch (error) {
+        showAlert("Social", parseApiError(error));
+      } finally {
+        setSendingFriendUserId(null);
+      }
+    },
+    [auth, loadOverview, loadProfile, refreshSearchIfNeeded, selectedProfile],
+  );
+
+  const handleAcceptRequest = useCallback(
+    async (requestId: number) => {
+      setRespondingFriendRequestId(requestId);
+      try {
+        await auth.acceptFriendRequest(requestId);
+        await Promise.all([loadOverview(), refreshSearchIfNeeded()]);
+        if (selectedProfile) {
+          await loadProfile("refresh");
+        }
+        showAlert("Social", "Solicitud aceptada.");
+      } catch (error) {
+        showAlert("Social", parseApiError(error));
+      } finally {
+        setRespondingFriendRequestId(null);
+      }
+    },
+    [auth, loadOverview, loadProfile, refreshSearchIfNeeded, selectedProfile],
+  );
+
+  const handleRejectRequest = useCallback(
+    async (requestId: number) => {
+      setRespondingFriendRequestId(requestId);
+      try {
+        await auth.rejectFriendRequest(requestId);
+        await Promise.all([loadOverview(), refreshSearchIfNeeded()]);
+        if (selectedProfile) {
+          await loadProfile("refresh");
+        }
+        showAlert("Social", "Solicitud rechazada.");
+      } catch (error) {
+        showAlert("Social", parseApiError(error));
+      } finally {
+        setRespondingFriendRequestId(null);
+      }
+    },
+    [auth, loadOverview, loadProfile, refreshSearchIfNeeded, selectedProfile],
+  );
+
+  const optimizePickedAssets = useCallback(async (assets: ImagePicker.ImagePickerAsset[]): Promise<string[]> => {
+    const prepared: string[] = [];
+    for (const asset of assets) {
+      if (!asset.uri) {
+        continue;
+      }
+      try {
+        const maxSide = Math.max(asset.width ?? 0, asset.height ?? 0);
+        const actions: ImageManipulator.Action[] = [];
+        if (maxSide > 1600 && asset.width && asset.height) {
+          const scale = 1600 / maxSide;
+          actions.push({
+            resize: {
+              width: Math.max(1, Math.round(asset.width * scale)),
+              height: Math.max(1, Math.round(asset.height * scale)),
+            },
+          });
+        }
+        const result = await ImageManipulator.manipulateAsync(asset.uri, actions, {
+          compress: 0.8,
+          format: ImageManipulator.SaveFormat.JPEG,
+        });
+        prepared.push(result.uri || asset.uri);
+      } catch {
+        prepared.push(asset.uri);
+      }
+    }
+    return prepared;
+  }, []);
+
+  const appendComposerPhotos = useCallback(
+    async (assets: ImagePicker.ImagePickerAsset[]) => {
+      if (!assets.length) {
+        return;
+      }
+      const remaining = Math.max(0, 3 - composerPhotos.length);
+      if (!remaining) {
+        showAlert("Publicación", "Máximo 3 fotos por publicación.");
+        return;
+      }
+      const optimized = await optimizePickedAssets(assets.slice(0, remaining));
+      setComposerPhotos((current) => [...current, ...optimized].slice(0, 3));
+    },
+    [composerPhotos.length, optimizePickedAssets],
+  );
+
+  const pickComposerPhotosFromLibrary = useCallback(async () => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      showAlert("Fotos", "Permite acceso a galería para publicar.");
+      return;
+    }
+    const remaining = Math.max(1, 3 - composerPhotos.length);
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: false,
+      allowsMultipleSelection: remaining > 1,
+      selectionLimit: remaining,
+      quality: 0.82,
+    });
+    if (!result.canceled) {
+      await appendComposerPhotos(result.assets);
+    }
+  }, [appendComposerPhotos, composerPhotos.length]);
+
+  const pickComposerPhotoFromCamera = useCallback(async () => {
+    const permission = await ImagePicker.requestCameraPermissionsAsync();
+    if (!permission.granted) {
+      showAlert("Fotos", "Permite acceso a cámara para publicar.");
+      return;
+    }
+    const result = await ImagePicker.launchCameraAsync({
+      allowsEditing: false,
+      quality: 0.82,
+    });
+    if (!result.canceled && result.assets[0]) {
+      await appendComposerPhotos([result.assets[0]]);
+    }
+  }, [appendComposerPhotos]);
+
+  const handlePublishPost = useCallback(async () => {
+    const recipeIngredients = composerRecipeIngredients.map((item) => item.trim()).filter(Boolean);
+    const recipeSteps = composerRecipeSteps.map((item) => item.trim()).filter(Boolean);
+    const recipeTags = composerRecipeTags
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+
+    const computedProgressWeight = toOptionalNumber(composerProgressWeight);
+    const computedProgressBodyFat = toOptionalNumber(composerProgressBodyFat);
+    const explicitBmi = toOptionalNumber(composerProgressBmi);
+    const derivedBmi =
+      explicitBmi ??
+      bmiValue(computedProgressWeight, auth.profile?.height_cm ?? null) ??
+      null;
+
+    if (composerType === "photo" && composerPhotos.length === 0) {
+      showAlert("Publicación", "La publicación de foto necesita al menos una imagen.");
+      return;
+    }
+    if (composerType === "recipe") {
+      const recipeKcal = toOptionalNumber(composerRecipeKcal);
+      const recipeProtein = toOptionalNumber(composerRecipeProtein);
+      const recipeCarbs = toOptionalNumber(composerRecipeCarbs);
+      const recipeFat = toOptionalNumber(composerRecipeFat);
+      if (!composerRecipeTitle.trim()) {
+        showAlert("Receta", "Pon un título a la receta.");
+        return;
+      }
+      if (!recipeIngredients.length || !recipeSteps.length) {
+        showAlert("Receta", "Añade al menos un ingrediente y un paso.");
+        return;
+      }
+      if (!composerPhotos.length) {
+        showAlert("Receta", "Añade al menos una foto del plato.");
+        return;
+      }
+      if (recipeKcal == null || recipeProtein == null || recipeCarbs == null || recipeFat == null) {
+        showAlert("Receta", "Esta receta no sale de aquí sin kcal, proteína, hidratos y grasas.");
+        return;
+      }
+    }
+    if (composerType === "progress") {
+      const hasProgressContent =
+        composerPhotos.length > 0 ||
+        computedProgressWeight != null ||
+        computedProgressBodyFat != null ||
+        derivedBmi != null ||
+        composerProgressNotes.trim().length > 0 ||
+        composerCaption.trim().length > 0;
+      if (!hasProgressContent) {
+        showAlert("Progreso", "Publicar aire todavía no cuenta como progreso.");
+        return;
+      }
+    }
+
+    setPublishingPost(true);
+    try {
+      const created = await auth.createSocialPost({
+        type: composerType,
+        caption: composerCaption,
+        visibility: composerVisibility,
+        photos: composerPhotos,
+        recipe:
+          composerType === "recipe"
+            ? {
+                title: composerRecipeTitle.trim(),
+                servings: toOptionalNumber(composerRecipeServings),
+                prep_time_min: toOptionalNumber(composerRecipePrepTime),
+                ingredients: recipeIngredients,
+                steps: recipeSteps,
+                nutrition_kcal: toOptionalNumber(composerRecipeKcal),
+                nutrition_protein_g: toOptionalNumber(composerRecipeProtein),
+                nutrition_carbs_g: toOptionalNumber(composerRecipeCarbs),
+                nutrition_fat_g: toOptionalNumber(composerRecipeFat),
+                tags: recipeTags,
+              }
+            : null,
+        progress:
+          composerType === "progress"
+            ? {
+                weight_kg: computedProgressWeight,
+                body_fat_pct: computedProgressBodyFat,
+                bmi: derivedBmi,
+                notes: composerProgressNotes.trim() || null,
+              }
+            : null,
+      });
+
+      setFeedState((current) => ({
+        ...current,
+        items: mergePosts([created], current.items),
+        loaded: true,
+      }));
+      if (selectedProfile && created.user.id === selectedProfile.id) {
+        setProfileState((current) => ({
+          ...current,
+          items: mergePosts([created], current.items),
+          posts_count: current.posts_count + 1,
+        }));
+      }
+      closeComposer();
+      resetComposer();
+      setSegment("feed");
+      showAlert("Social", "Publicación compartida.");
+    } catch (error) {
+      showAlert("Social", parseApiError(error));
+    } finally {
+      setPublishingPost(false);
+    }
+  }, [
+    auth,
+    auth.profile?.height_cm,
+    closeComposer,
+    composerCaption,
+    composerPhotos,
+    composerProgressBmi,
+    composerProgressBodyFat,
+    composerProgressNotes,
+    composerProgressWeight,
+    composerRecipeCarbs,
+    composerRecipeFat,
+    composerRecipeIngredients,
+    composerRecipeKcal,
+    composerRecipePrepTime,
+    composerRecipeProtein,
+    composerRecipeServings,
+    composerRecipeSteps,
+    composerRecipeTags,
+    composerRecipeTitle,
+    composerType,
+    composerVisibility,
+    mergePosts,
+    resetComposer,
+    selectedProfile,
+  ]);
+
+  const openComments = useCallback(
+    async (post: SocialPost) => {
+      setCommentsPost(post);
+      setCommentsVisible(true);
+      setCommentsLoading(true);
+      try {
+        const items = await auth.fetchSocialComments(post.id);
+        setCommentsItems(items);
+      } catch (error) {
+        showAlert("Comentarios", parseApiError(error));
+      } finally {
+        setCommentsLoading(false);
+      }
+    },
+    [auth],
+  );
+
+  const closeComments = useCallback(() => {
+    setCommentsVisible(false);
+    setCommentsPost(null);
+    setCommentsItems([]);
+    setCommentDraft("");
+  }, []);
+
+  const submitComment = useCallback(async () => {
+    if (!commentsPost || !commentDraft.trim()) {
+      return;
+    }
+    setSendingComment(true);
+    try {
+      const created = await auth.createSocialComment(commentsPost.id, commentDraft.trim());
+      setCommentsItems((current) => [...current, created]);
+      setCommentDraft("");
+      applyPostUpdateEverywhere(commentsPost.id, (post) => ({
+        ...post,
+        comment_count: post.comment_count + 1,
+      }));
+    } catch (error) {
+      showAlert("Comentarios", parseApiError(error));
+    } finally {
+      setSendingComment(false);
+    }
+  }, [applyPostUpdateEverywhere, auth, commentDraft, commentsPost]);
+
+  const toggleLike = useCallback(
+    async (post: SocialPost) => {
+      try {
+        const response = post.liked_by_me ? await auth.unlikeSocialPost(post.id) : await auth.likeSocialPost(post.id);
+        applyPostUpdateEverywhere(post.id, (current) => ({
+          ...current,
+          liked_by_me: response.liked,
+          like_count: response.like_count,
+        }));
+      } catch (error) {
+        showAlert("Social", parseApiError(error));
+      }
+    },
+    [applyPostUpdateEverywhere, auth],
+  );
+
+  const handleManagePost = useCallback(
+    (post: SocialPost) => {
+      const visibilityOptions: Array<{ visibility: SocialVisibility; text: string }> = [
+        { visibility: "public", text: "Pública" },
+        { visibility: "friends", text: "Amigos" },
+        { visibility: "private", text: "Privada" },
+      ];
+      const options = visibilityOptions.filter((item) => item.visibility !== post.visibility);
+
+      showAlert("Gestionar publicación", "Cambia la visibilidad o bórrala si ya hizo su trabajo.", [
+        ...options.map((item) => ({
+          text: item.text,
+          onPress: async () => {
+            try {
+              const updated = await auth.updateSocialPostVisibility(post.id, item.visibility);
+              applyPostUpdateEverywhere(post.id, () => updated);
+              setExploreState((current) => ({
+                ...current,
+                items: current.items.filter((currentPost) => currentPost.id !== post.id),
+              }));
+            } catch (error) {
+              showAlert("Publicación", parseApiError(error));
+            }
+          },
+        })),
+        {
+          text: "Eliminar",
+          style: "destructive",
+          onPress: () =>
+            showAlert("Eliminar publicación", "Si la borras, desaparece de verdad. Luego no vale arrepentirse.", [
+              { text: "Cancelar", style: "cancel" },
+              {
+                text: "Eliminar",
+                style: "destructive",
+                onPress: async () => {
+                  try {
+                    await auth.deleteSocialPost(post.id);
+                    removePostEverywhere(post.id);
+                    if (commentsPost?.id === post.id) {
+                      setCommentsVisible(false);
+                      setCommentsPost(null);
+                      setCommentsItems([]);
+                      setCommentDraft("");
+                    }
+                  } catch (error) {
+                    showAlert("Publicación", parseApiError(error));
+                  }
+                },
+              },
+            ]),
+        },
+        { text: "Cancelar", style: "cancel" },
+      ]);
+    },
+    [applyPostUpdateEverywhere, auth, commentsPost?.id, removePostEverywhere],
+  );
+
+  const handleShare = useCallback(async (post: SocialPost) => {
+    const primaryText =
+      post.type === "recipe" && post.recipe
+        ? `${post.recipe.title}\n\n${post.caption ?? ""}`.trim()
+        : `${post.caption ?? socialTypeLabel(post.type)}\n\nCompartido desde NutriTracker`.trim();
+    try {
+      await Share.share({
+        message: primaryText,
+      });
+    } catch {
+      showAlert("Social", "No se pudo abrir el panel de compartir.");
+    }
+  }, []);
+
+  const renderSegments = () => {
+    const items: Array<{ value: SocialSegmentTab; label: string; badge?: number }> = [
+      { value: "feed", label: "Feed" },
+      { value: "explore", label: "Explorar" },
+      { value: "friends", label: "Amigos" },
+      { value: "requests", label: "Solicitudes", badge: requestBadgeCount },
+    ];
+
+    return (
+      <View style={styles.socialSegmentsRow}>
+        {items.map((item) => {
+          const active = segment === item.value;
+          return (
+            <Pressable
+              key={item.value}
+              style={[styles.socialSegmentChip, active && styles.socialSegmentChipActive]}
+              onPress={() => setSegment(item.value)}
+            >
+              <Text style={[styles.socialSegmentChipText, active && styles.socialSegmentChipTextActive]}>{item.label}</Text>
+              {item.badge ? (
+                <View style={[styles.socialSegmentBadge, active && styles.socialSegmentBadgeActive]}>
+                  <Text style={styles.socialSegmentBadgeText}>{item.badge}</Text>
+                </View>
+              ) : null}
+            </Pressable>
+          );
+        })}
+      </View>
+    );
+  };
+
+  const renderFeedFilters = () => {
+    return (
+      <View style={styles.socialFilterBlock}>
+        <View style={styles.socialFilterDropdownRow}>
+          <Pressable
+            style={({ pressed }) => [styles.socialFilterSelect, pressed && styles.socialFilterSelectPressed]}
+            onPress={() => setFeedFilterMenu("sort")}
+          >
+            <View style={styles.socialFilterSelectValueRow}>
+              <Text style={styles.socialFilterSelectLabel}>Orden</Text>
+              <Text style={styles.socialFilterSelectDivider}>·</Text>
+              <Text style={styles.socialFilterSelectValue}>{socialFeedSortLabel(feedSort)}</Text>
+              <Text style={styles.socialFilterSelectChevron}>▾</Text>
+            </View>
+          </Pressable>
+
+          <Pressable
+            style={({ pressed }) => [styles.socialFilterSelect, pressed && styles.socialFilterSelectPressed]}
+            onPress={() => setFeedFilterMenu("type")}
+          >
+            <View style={styles.socialFilterSelectValueRow}>
+              <Text style={styles.socialFilterSelectLabel}>Tipo</Text>
+              <Text style={styles.socialFilterSelectDivider}>·</Text>
+              <Text style={styles.socialFilterSelectValue}>{socialFeedTypeFilterLabel(feedTypeFilter)}</Text>
+              <Text style={styles.socialFilterSelectChevron}>▾</Text>
+            </View>
+          </Pressable>
+        </View>
+      </View>
+    );
+  };
+
+  const renderFeedFilterModal = () => {
+    if (!feedFilterMenu) {
+      return null;
+    }
+
+    const isSortMenu = feedFilterMenu === "sort";
+    const options = isSortMenu
+      ? ([
+          { value: "relevance", label: "Relevancia", meta: "Amigos primero y luego el resto." },
+          { value: "recent", label: "Más reciente", meta: "Orden cronológico puro." },
+        ] as const)
+      : ([
+          { value: "all", label: "Todo" },
+          { value: "photo", label: "Foto" },
+          { value: "recipe", label: "Receta" },
+          { value: "progress", label: "Progreso" },
+        ] as const);
+
+    return (
+      <Modal transparent animationType="fade" visible onRequestClose={closeFeedFilterMenu}>
+        <View style={styles.socialModalLayer}>
+          <Pressable style={styles.socialModalBackdrop} onPress={closeFeedFilterMenu} />
+          <View style={[styles.socialModalCard, styles.socialFilterModalCard]}>
+            <Text style={styles.socialModalTitle}>{isSortMenu ? "Orden del feed" : "Tipo de publicación"}</Text>
+            <View style={styles.socialFilterOptionList}>
+              {options.map((option) => {
+                const active = isSortMenu ? feedSort === option.value : feedTypeFilter === option.value;
+                const typeMeta =
+                  !isSortMenu && (option.value === "photo" || option.value === "recipe" || option.value === "progress")
+                    ? socialTypeMeta(option.value)
+                    : null;
+                return (
+                  <Pressable
+                    key={`filter-option-${option.value}`}
+                    style={[
+                      styles.socialFilterOption,
+                      active && styles.socialFilterOptionActive,
+                      typeMeta
+                        ? {
+                            borderColor: active ? typeMeta.color : typeMeta.borderColor,
+                            backgroundColor: active ? typeMeta.softBackground : theme.panelSoft,
+                          }
+                        : null,
+                    ]}
+                    onPress={() => {
+                      if (isSortMenu) {
+                        setFeedSort(option.value as SocialFeedSort);
+                      } else {
+                        setFeedTypeFilter(option.value as SocialFeedTypeFilter);
+                      }
+                      closeFeedFilterMenu();
+                    }}
+                  >
+                    <View style={styles.socialFilterOptionCopy}>
+                      <Text
+                        style={[
+                          styles.socialFilterOptionTitle,
+                          active && styles.socialFilterOptionTitleActive,
+                          typeMeta && active ? { color: typeMeta.color } : null,
+                        ]}
+                      >
+                        {option.label}
+                      </Text>
+                      {"meta" in option && option.meta ? <Text style={styles.socialFilterOptionMeta}>{option.meta}</Text> : null}
+                    </View>
+                    {active ? <Text style={styles.socialFilterOptionCheck}>✓</Text> : null}
+                  </Pressable>
+                );
+              })}
+            </View>
+            <SecondaryButton title="Cerrar" onPress={closeFeedFilterMenu} />
+          </View>
+        </View>
+      </Modal>
+    );
+  };
+
+  const renderFeedList = (scope: "feed" | "explore") => {
+    const state = scope === "feed" ? feedState : exploreState;
+    if (state.loading && !state.items.length) {
+      return (
+        <SafeAreaView style={styles.screen}>
+          <ScrollView contentContainerStyle={[styles.mainScroll, webMainScrollStyle, styles.socialMainContent]}>
+            <AppHeader
+              title="Social"
+              subtitle="Fotos, recetas, progreso y gente que también entrena en serio."
+              rightActionLabel="Crear"
+              onRightAction={() => openComposer("photo")}
+            />
+            {renderSegments()}
+            {renderFeedFilters()}
+            <SocialFeedSkeleton />
+          </ScrollView>
+        </SafeAreaView>
+      );
+    }
+
+    return (
+      <SafeAreaView style={styles.screen}>
+        <FlatList
+          data={state.items}
+          keyExtractor={(item) => item.id}
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={[styles.mainScroll, webMainScrollStyle, styles.socialMainContent]}
+          refreshControl={<RefreshControl tintColor={theme.accent} refreshing={state.refreshing} onRefresh={() => void loadFeed(scope, "refresh")} />}
+          ListHeaderComponent={
+            <View>
+              <AppHeader
+                title="Social"
+                subtitle="Fotos, recetas, progreso y gente que también entrena en serio."
+                rightActionLabel="Crear"
+                onRightAction={() => openComposer("photo")}
+              />
+              {renderSegments()}
+              {renderFeedFilters()}
+              {state.error ? (
+                <AppCard style={styles.socialStatusCard}>
+                  <Text style={styles.emptyStateTitle}>No se pudo cargar el feed</Text>
+                  <Text style={styles.emptyStateSubtitle}>{state.error}</Text>
+                  <SecondaryButton title="Reintentar" onPress={() => void loadFeed(scope)} />
+                </AppCard>
+              ) : null}
+            </View>
+          }
+          ListEmptyComponent={
+            <EmptyState
+              title={scope === "feed" ? "Tu feed está tranquilo" : "Explorar todavía no tiene nada"}
+              subtitle={
+                scope === "feed"
+                  ? "Añade amigos o publica algo propio para que esto no parezca un solar premium."
+                  : "Cuando haya publicaciones públicas recientes aparecerán aquí."
+              }
+            />
+          }
+          renderItem={({ item }) => (
+            <SocialPostCard
+              post={item}
+              onOpenProfile={openProfile}
+              onToggleLike={(post) => void toggleLike(post)}
+              onOpenComments={(post) => void openComments(post)}
+              onShare={(post) => void handleShare(post)}
+              canManage={item.user.id === auth.user?.id}
+              onManagePost={(post) => void handleManagePost(post)}
+            />
+          )}
+          ListFooterComponent={
+            state.loadingMore ? (
+              <View style={styles.socialListFooter}>
+                <ActivityIndicator color={theme.accent} />
+              </View>
+            ) : null
+          }
+          onEndReachedThreshold={0.3}
+          onEndReached={() => {
+            if (state.nextCursor) {
+              void loadFeed(scope, "more");
+            }
+          }}
+        />
+      </SafeAreaView>
+    );
+  };
+
+  const renderUserRow = (user: SocialUser, right: React.ReactNode, key: string) => (
+    <View key={key} style={styles.socialDirectoryRow}>
+      <Pressable style={styles.socialDirectoryUserPressable} onPress={() => openProfile(user)}>
+        <AvatarCircle letter={user.username} imageUrl={user.avatar_url} />
+        <View style={styles.socialDirectoryCopy}>
+          <Text style={styles.socialUserName}>@{user.username}</Text>
+          <Text style={styles.helperText}>{user.email}</Text>
+        </View>
+      </Pressable>
+      <View style={styles.socialDirectoryRight}>{right}</View>
+    </View>
+  );
+
+  const renderFriendsAndRequests = () => (
+    <SafeAreaView style={styles.screen}>
+      <ScrollView contentContainerStyle={[styles.mainScroll, webMainScrollStyle, styles.socialMainContent]}>
+        <AppHeader
+          title="Social"
+          subtitle="Tu red, tus publicaciones y el nivel justo de cotilleo fitness."
+          rightActionLabel="Crear"
+          onRightAction={() => openComposer("photo")}
+        />
+        {renderSegments()}
+
+        {segment === "friends" ? (
+          <>
+            <AppCard>
+              <SectionHeader title="Buscar usuarios" subtitle="Por username o email" />
+              <InputField
+                label="Buscar usuarios"
+                value={socialSearch}
+                onChangeText={setSocialSearch}
+                autoCapitalize="none"
+                placeholder="username o email"
+              />
+              {searchingSocial ? <ActivityIndicator color={theme.accent} /> : null}
+              {socialSearch.trim().length >= 1 ? (
+                socialResults.length ? (
+                  <View style={styles.socialDirectoryList}>
+                    {socialResults.map((item) =>
+                      renderUserRow(
+                        item,
+                        item.friendship_status === "none" ? (
+                          <Pressable
+                            onPress={() => void handleSendFriendRequest(item.id)}
+                            style={[styles.socialActionButton, sendingFriendUserId === item.id && styles.socialActionButtonDisabled]}
+                            disabled={sendingFriendUserId === item.id}
+                          >
+                            <Text style={styles.socialActionButtonText}>
+                              {sendingFriendUserId === item.id ? "Enviando..." : "Añadir"}
+                            </Text>
+                          </Pressable>
+                        ) : item.friendship_status === "incoming_pending" && item.friendship_id ? (
+                          <Pressable
+                            onPress={() => void handleAcceptRequest(item.friendship_id as number)}
+                            style={[
+                              styles.socialActionButton,
+                              respondingFriendRequestId === item.friendship_id && styles.socialActionButtonDisabled,
+                            ]}
+                            disabled={respondingFriendRequestId === item.friendship_id}
+                          >
+                            <Text style={styles.socialActionButtonText}>Aceptar</Text>
+                          </Pressable>
+                        ) : (
+                          <TagChip
+                            label={
+                              item.friendship_status === "friends"
+                                ? "Amigos"
+                                : item.friendship_status === "outgoing_pending"
+                                  ? "Pendiente"
+                                  : "Solicitud recibida"
+                            }
+                            tone={item.friendship_status === "friends" ? "accent" : "default"}
+                          />
+                        ),
+                        `search-${item.id}`,
+                      ),
+                    )}
+                  </View>
+                ) : (
+                  <Text style={styles.helperText}>No hay usuarios que coincidan.</Text>
+                )
+              ) : (
+                <Text style={styles.helperText}>Empieza a escribir y buscará al vuelo.</Text>
+              )}
+            </AppCard>
+
+            <AppCard>
+              <SectionHeader title="Amigos" subtitle="Gente cuya actividad puedes seguir" />
+              {loadingOverview && !overviewLoaded ? <ActivityIndicator color={theme.accent} /> : null}
+              {socialOverview.friends.length ? (
+                <View style={styles.socialDirectoryList}>
+                  {socialOverview.friends.map((friend) =>
+                    renderUserRow(friend, <TagChip label="Amigo" tone="accent" />, `friend-${friend.id}`),
+                  )}
+                </View>
+              ) : (
+                <Text style={styles.helperText}>Todavía no tienes amigos añadidos.</Text>
+              )}
+            </AppCard>
+          </>
+        ) : (
+          <>
+            <AppCard>
+              <SectionHeader title="Solicitudes recibidas" subtitle="Acepta o rechaza" />
+              {loadingOverview && !overviewLoaded ? <ActivityIndicator color={theme.accent} /> : null}
+              {socialOverview.incoming_requests.length ? (
+                <View style={styles.socialDirectoryList}>
+                  {socialOverview.incoming_requests.map((requestItem) => (
+                    <View key={`incoming-${requestItem.id}`} style={styles.socialRequestCard}>
+                      <Pressable style={styles.socialDirectoryUserPressable} onPress={() => openProfile(requestItem.user)}>
+                        <AvatarCircle letter={requestItem.user.username} imageUrl={requestItem.user.avatar_url} />
+                        <View style={styles.socialDirectoryCopy}>
+                          <Text style={styles.socialUserName}>@{requestItem.user.username}</Text>
+                          <Text style={styles.helperText}>{requestItem.user.email}</Text>
+                        </View>
+                      </Pressable>
+                      <View style={styles.socialRequestActions}>
+                        <Pressable
+                          style={[
+                            styles.socialActionButton,
+                            respondingFriendRequestId === requestItem.id && styles.socialActionButtonDisabled,
+                          ]}
+                          onPress={() => void handleAcceptRequest(requestItem.id)}
+                          disabled={respondingFriendRequestId === requestItem.id}
+                        >
+                          <Text style={styles.socialActionButtonText}>Aceptar</Text>
+                        </Pressable>
+                        <Pressable
+                          style={[
+                            styles.secondaryButton,
+                            respondingFriendRequestId === requestItem.id && styles.socialActionButtonDisabled,
+                          ]}
+                          onPress={() => void handleRejectRequest(requestItem.id)}
+                          disabled={respondingFriendRequestId === requestItem.id}
+                        >
+                          <Text style={styles.secondaryButtonText}>Rechazar</Text>
+                        </Pressable>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              ) : (
+                <Text style={styles.helperText}>No tienes solicitudes pendientes.</Text>
+              )}
+            </AppCard>
+
+          </>
+        )}
+      </ScrollView>
+    </SafeAreaView>
+  );
+
+  const renderProfileView = () => {
+    if (!selectedProfile) {
+      return null;
+    }
+    if (profileState.loading && !profileState.items.length) {
+      return (
+        <SafeAreaView style={styles.screen}>
+          <ScrollView contentContainerStyle={[styles.mainScroll, webMainScrollStyle, styles.socialMainContent]}>
+            <AppHeader title={`@${selectedProfile.username}`} subtitle="Perfil social" onBack={closeProfile} />
+            <SocialFeedSkeleton count={2} />
+          </ScrollView>
+        </SafeAreaView>
+      );
+    }
+
+    return (
+      <SafeAreaView style={styles.screen}>
+        <FlatList
+          data={profileState.items}
+          keyExtractor={(item) => item.id}
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={[styles.mainScroll, webMainScrollStyle, styles.socialMainContent]}
+          refreshControl={<RefreshControl tintColor={theme.accent} refreshing={profileState.refreshing} onRefresh={() => void loadProfile("refresh")} />}
+          ListHeaderComponent={
+            <View>
+              <AppHeader title={`@${profileState.user?.username ?? selectedProfile.username}`} subtitle="Perfil social" onBack={closeProfile} />
+              <AppCard style={styles.socialProfileHero}>
+                <View style={styles.socialProfileTopRow}>
+                  <View style={styles.socialProfileIdentity}>
+                    <AvatarCircle
+                      letter={profileState.user?.username ?? selectedProfile.username}
+                      imageUrl={profileState.user?.avatar_url ?? selectedProfile.avatar_url}
+                      size={68}
+                    />
+                    <View style={styles.socialProfileIdentityCopy}>
+                      <Text style={styles.socialProfileHandle}>@{profileState.user?.username ?? selectedProfile.username}</Text>
+                      <Text style={styles.helperText}>{profileState.user?.email ?? selectedProfile.email}</Text>
+                    </View>
+                  </View>
+                  {!profileState.is_me ? (
+                    profileState.is_friend ? (
+                      <TagChip label="Amigos" tone="accent" />
+                    ) : profileState.outgoing_request_pending ? (
+                      <TagChip label="Solicitud enviada" tone="default" />
+                    ) : profileState.incoming_request_pending ? (
+                      <Pressable
+                        style={[
+                          styles.socialActionButton,
+                          respondingFriendRequestId != null && styles.socialActionButtonDisabled,
+                        ]}
+                        onPress={() => {
+                          const requestId = socialOverview.incoming_requests.find((item) => item.user.id === selectedProfile.id)?.id;
+                          if (requestId) {
+                            void handleAcceptRequest(requestId);
+                          }
+                        }}
+                      >
+                        <Text style={styles.socialActionButtonText}>Aceptar amistad</Text>
+                      </Pressable>
+                    ) : (
+                      <Pressable
+                        style={[
+                          styles.socialActionButton,
+                          sendingFriendUserId === selectedProfile.id && styles.socialActionButtonDisabled,
+                        ]}
+                        onPress={() => void handleSendFriendRequest(selectedProfile.id)}
+                        disabled={sendingFriendUserId === selectedProfile.id}
+                      >
+                        <Text style={styles.socialActionButtonText}>
+                          {sendingFriendUserId === selectedProfile.id ? "Enviando..." : "Añadir amigo"}
+                        </Text>
+                      </Pressable>
+                    )
+                  ) : (
+                    <TagChip label="Tu perfil" tone="default" />
+                  )}
+                </View>
+                <View style={styles.socialProfileStatsRow}>
+                  <MetricCard label="Posts" value={String(profileState.posts_count)} />
+                  <MetricCard label="Amigos" value={String(profileState.friends_count)} />
+                  <MetricCard label="Acceso" value={profileState.is_me ? "Completo" : profileState.is_friend ? "Amigos" : "Público"} />
+                </View>
+              </AppCard>
+              {profileState.error ? (
+                <AppCard style={styles.socialStatusCard}>
+                  <Text style={styles.emptyStateTitle}>No se pudo cargar el perfil</Text>
+                  <Text style={styles.emptyStateSubtitle}>{profileState.error}</Text>
+                </AppCard>
+              ) : null}
+            </View>
+          }
+          ListEmptyComponent={<EmptyState title="Sin publicaciones" subtitle="Este perfil todavía no ha compartido nada que puedas ver." />}
+          renderItem={({ item }) => (
+            <SocialPostCard
+              post={item}
+              onOpenProfile={openProfile}
+              onToggleLike={(post) => void toggleLike(post)}
+              onOpenComments={(post) => void openComments(post)}
+              onShare={(post) => void handleShare(post)}
+              canManage={item.user.id === auth.user?.id}
+              onManagePost={(post) => void handleManagePost(post)}
+            />
+          )}
+          ListFooterComponent={
+            profileState.loadingMore ? (
+              <View style={styles.socialListFooter}>
+                <ActivityIndicator color={theme.accent} />
+              </View>
+            ) : null
+          }
+          onEndReachedThreshold={0.3}
+          onEndReached={() => {
+            if (profileState.next_cursor) {
+              void loadProfile("more");
+            }
+          }}
+        />
+      </SafeAreaView>
+    );
+  };
+
+  if (selectedProfile) {
+    return (
+      <>
+        {renderProfileView()}
+        {commentsVisible ? (
+          <Modal transparent animationType="fade" visible onRequestClose={closeComments}>
+            <View style={styles.socialModalLayer}>
+              <Pressable style={styles.socialModalBackdrop} onPress={closeComments} />
+              <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.socialModalKeyboardWrap}>
+                <View style={[styles.socialModalCard, styles.socialCommentsModalCard]}>
+                  <Text style={styles.socialModalTitle}>Comentarios</Text>
+                  {commentsLoading ? (
+                    <ActivityIndicator color={theme.accent} />
+                  ) : (
+                    <ScrollView style={styles.socialCommentsList} contentContainerStyle={styles.socialCommentsListContent}>
+                      {commentsItems.length ? (
+                        commentsItems.map((comment) => (
+                          <View key={`comment-${comment.id}`} style={styles.socialCommentRow}>
+                            <AvatarCircle letter={comment.user.username} imageUrl={comment.user.avatar_url} />
+                            <View style={styles.socialCommentCopy}>
+                              <Text style={styles.socialCommentAuthor}>@{comment.user.username}</Text>
+                              <Text style={styles.socialCommentText}>{comment.text}</Text>
+                            </View>
+                          </View>
+                        ))
+                      ) : (
+                        <Text style={styles.helperText}>Todavía no hay comentarios.</Text>
+                      )}
+                    </ScrollView>
+                  )}
+                  <View style={styles.socialCommentComposer}>
+                    <TextInput
+                      value={commentDraft}
+                      onChangeText={setCommentDraft}
+                      placeholder="Escribe un comentario"
+                      style={[styles.input, styles.socialCommentInput]}
+                    />
+                    <PrimaryButton title={sendingComment ? "Enviando..." : "Enviar"} onPress={() => void submitComment()} disabled={!commentDraft.trim() || sendingComment} />
+                  </View>
+                </View>
+              </KeyboardAvoidingView>
+            </View>
+          </Modal>
+        ) : null}
+      </>
+    );
+  }
+
+  return (
+    <>
+      {segment === "feed" ? renderFeedList("feed") : segment === "explore" ? renderFeedList("explore") : renderFriendsAndRequests()}
+      {renderFeedFilterModal()}
+
+      {composerVisible ? (
+        <Modal transparent animationType="fade" visible onRequestClose={closeComposer}>
+          <View style={styles.socialModalLayer}>
+            <Pressable style={styles.socialModalBackdrop} onPress={closeComposer} />
+            <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.socialModalKeyboardWrap}>
+              <ScrollView contentContainerStyle={styles.socialComposerScrollContent}>
+                <View style={styles.socialModalCard}>
+                  <Text style={styles.socialModalTitle}>Crear publicación</Text>
+                  <ChoiceRow
+                    label="Tipo"
+                    value={composerType}
+                    onChange={(value) => {
+                      setComposerType(value);
+                      if (value === "progress") {
+                        setComposerVisibility("friends");
+                      }
+                    }}
+                    options={[
+                      { label: "Foto", value: "photo" },
+                      { label: "Receta", value: "recipe" },
+                      { label: "Progreso", value: "progress" },
+                    ]}
+                  />
+                  <ChoiceRow
+                    label="Visibilidad"
+                    value={composerVisibility}
+                    onChange={setComposerVisibility}
+                    options={[
+                      { label: "Amigos", value: "friends" },
+                      { label: "Pública", value: "public" },
+                      { label: "Privada", value: "private" },
+                    ]}
+                  />
+                  <View style={styles.fieldWrap}>
+                    <Text style={styles.fieldLabel}>Caption</Text>
+                    <TextInput
+                      value={composerCaption}
+                      onChangeText={setComposerCaption}
+                      placeholder="Qué quieres contar"
+                      multiline
+                      textAlignVertical="top"
+                      style={[styles.input, styles.socialComposerTextarea]}
+                    />
+                  </View>
+
+                  <View style={styles.fieldWrap}>
+                    <Text style={styles.fieldLabel}>Fotos</Text>
+                    <View style={styles.socialPhotoControls}>
+                      <SecondaryButton title="Galería" onPress={() => void pickComposerPhotosFromLibrary()} />
+                      <SecondaryButton title="Cámara" onPress={() => void pickComposerPhotoFromCamera()} />
+                    </View>
+                    {composerPhotos.length ? (
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.socialComposerPhotoStrip}>
+                        {composerPhotos.map((uri, index) => (
+                          <View key={`composer-photo-${index}`} style={styles.socialComposerPhotoItem}>
+                            <Image source={{ uri }} style={styles.socialComposerPhotoThumb} />
+                            <Pressable
+                              style={styles.socialComposerPhotoRemove}
+                              onPress={() => setComposerPhotos((current) => current.filter((_, itemIndex) => itemIndex !== index))}
+                            >
+                              <Text style={styles.socialComposerPhotoRemoveText}>×</Text>
+                            </Pressable>
+                          </View>
+                        ))}
+                      </ScrollView>
+                    ) : (
+                      <Text style={styles.helperText}>Hasta 3 fotos por publicación.</Text>
+                    )}
+                  </View>
+
+                  {composerType === "recipe" ? (
+                    <>
+                      <InputField label="Título" value={composerRecipeTitle} onChangeText={setComposerRecipeTitle} placeholder="Bowl post-entreno" />
+                      <View style={styles.socialRecipeComposerGrid}>
+                        <InputField
+                          label="Raciones"
+                          value={composerRecipeServings}
+                          onChangeText={setComposerRecipeServings}
+                          keyboardType="numeric"
+                          placeholder="2"
+                        />
+                        <InputField
+                          label="Tiempo (min)"
+                          value={composerRecipePrepTime}
+                          onChangeText={setComposerRecipePrepTime}
+                          keyboardType="numeric"
+                          placeholder="15"
+                        />
+                      </View>
+                      <EditableStringListField
+                        label="Ingredientes"
+                        items={composerRecipeIngredients}
+                        placeholder="200 g yogur, 30 g avena..."
+                        addLabel="Añadir ingrediente"
+                        onChange={setComposerRecipeIngredients}
+                      />
+                      <EditableStringListField
+                        label="Pasos"
+                        items={composerRecipeSteps}
+                        placeholder="Mezcla, hornea, sirve..."
+                        addLabel="Añadir paso"
+                        onChange={setComposerRecipeSteps}
+                      />
+                      <InputField
+                        label="Tags"
+                        value={composerRecipeTags}
+                        onChangeText={setComposerRecipeTags}
+                        placeholder="high_protein, easy, breakfast"
+                      />
+                      <View style={styles.socialRecipeComposerGrid}>
+                        <InputField label="Kcal" value={composerRecipeKcal} onChangeText={setComposerRecipeKcal} keyboardType="numeric" placeholder="520" />
+                        <InputField label="Proteína" value={composerRecipeProtein} onChangeText={setComposerRecipeProtein} keyboardType="numeric" placeholder="38" />
+                        <InputField label="Carbs" value={composerRecipeCarbs} onChangeText={setComposerRecipeCarbs} keyboardType="numeric" placeholder="44" />
+                        <InputField label="Grasas" value={composerRecipeFat} onChangeText={setComposerRecipeFat} keyboardType="numeric" placeholder="16" />
+                      </View>
+                    </>
+                  ) : null}
+
+                  {composerType === "progress" ? (
+                    <>
+                      <View style={styles.socialRecipeComposerGrid}>
+                        <InputField
+                          label="Peso actual"
+                          value={composerProgressWeight}
+                          onChangeText={setComposerProgressWeight}
+                          keyboardType="numeric"
+                          placeholder="78.5"
+                        />
+                        <InputField
+                          label="% grasa"
+                          value={composerProgressBodyFat}
+                          onChangeText={setComposerProgressBodyFat}
+                          keyboardType="numeric"
+                          placeholder="14.2"
+                        />
+                        <InputField label="IMC" value={composerProgressBmi} onChangeText={setComposerProgressBmi} keyboardType="numeric" placeholder="24.1" />
+                      </View>
+                      <View style={styles.fieldWrap}>
+                        <Text style={styles.fieldLabel}>Notas</Text>
+                        <TextInput
+                          value={composerProgressNotes}
+                          onChangeText={setComposerProgressNotes}
+                          placeholder="Qué ha cambiado esta semana"
+                          multiline
+                          textAlignVertical="top"
+                          style={[styles.input, styles.socialComposerTextarea]}
+                        />
+                      </View>
+                    </>
+                  ) : null}
+
+                  <View style={styles.socialComposerActions}>
+                    <SecondaryButton title="Cancelar" onPress={closeComposer} />
+                    <PrimaryButton title={publishingPost ? "Publicando..." : "Publicar"} onPress={() => void handlePublishPost()} loading={publishingPost} />
+                  </View>
+                </View>
+              </ScrollView>
+            </KeyboardAvoidingView>
+          </View>
+        </Modal>
+      ) : null}
+
+      {commentsVisible ? (
+        <Modal transparent animationType="fade" visible onRequestClose={closeComments}>
+          <View style={styles.socialModalLayer}>
+            <Pressable style={styles.socialModalBackdrop} onPress={closeComments} />
+            <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.socialModalKeyboardWrap}>
+              <View style={[styles.socialModalCard, styles.socialCommentsModalCard]}>
+                <Text style={styles.socialModalTitle}>Comentarios</Text>
+                {commentsLoading ? (
+                  <ActivityIndicator color={theme.accent} />
+                ) : (
+                  <ScrollView style={styles.socialCommentsList} contentContainerStyle={styles.socialCommentsListContent}>
+                    {commentsItems.length ? (
+                      commentsItems.map((comment) => (
+                        <View key={`comment-${comment.id}`} style={styles.socialCommentRow}>
+                          <AvatarCircle letter={comment.user.username} imageUrl={comment.user.avatar_url} />
+                          <View style={styles.socialCommentCopy}>
+                            <Text style={styles.socialCommentAuthor}>@{comment.user.username}</Text>
+                            <Text style={styles.socialCommentText}>{comment.text}</Text>
+                          </View>
+                        </View>
+                      ))
+                    ) : (
+                      <Text style={styles.helperText}>Todavía no hay comentarios.</Text>
+                    )}
+                  </ScrollView>
+                )}
+                <View style={styles.socialCommentComposer}>
+                  <TextInput
+                    value={commentDraft}
+                    onChangeText={setCommentDraft}
+                    placeholder="Escribe un comentario"
+                    style={[styles.input, styles.socialCommentInput]}
+                  />
+                  <PrimaryButton title={sendingComment ? "Enviando..." : "Enviar"} onPress={() => void submitComment()} disabled={!commentDraft.trim() || sendingComment} />
+                </View>
+              </View>
+            </KeyboardAvoidingView>
+          </View>
+        </Modal>
+      ) : null}
+    </>
   );
 }
 
@@ -5640,8 +8419,9 @@ function QuantityMethodSelector(props: {
   onChange: (method: IntakeMethod) => void;
   product: Product;
 }) {
+  const isRecipeProduct = props.product.source === "user_recipe";
   const options: Array<{ label: string; value: IntakeMethod; disabled?: boolean }> = [
-    { label: "Gramos", value: "grams" },
+    { label: "Gramos", value: "grams", disabled: isRecipeProduct },
     { label: "Porción", value: "units", disabled: !props.product.serving_size_g },
     { label: "% paquete", value: "percent_pack", disabled: !props.product.net_weight_g },
   ];
@@ -5702,10 +8482,52 @@ function AddScreen(props: {
   const scanPulse = useRef(new Animated.Value(0)).current;
   const [recentProducts, setRecentProducts] = useState<Array<{ id: number; name: string }>>([]);
   const [favoriteProducts, setFavoriteProducts] = useState<FavoriteProduct[]>([]);
-  const [myRecipeProducts, setMyRecipeProducts] = useState<Product[]>([]);
+  const [myRecipes, setMyRecipes] = useState<UserRecipe[]>([]);
   const [loadingMyRecipes, setLoadingMyRecipes] = useState(false);
   const lastHubDataRefreshRef = useRef(0);
   const lastRecipesRefreshRef = useRef(0);
+  const [recipesStage, setRecipesStage] = useState<"chooser" | "detail" | "manual" | "ai_input" | "ai_options" | "ai_result">("chooser");
+  const [recipeManualBackStage, setRecipeManualBackStage] = useState<"chooser" | "detail" | "ai_result">("chooser");
+  const [selectedRecipe, setSelectedRecipe] = useState<UserRecipe | null>(null);
+  const [recipeSearch, setRecipeSearch] = useState("");
+  const [recipeDraftId, setRecipeDraftId] = useState<number | null>(null);
+  const [recipeTitle, setRecipeTitle] = useState("");
+  const [recipeMealType, setRecipeMealType] = useState<RecipeMealType>("lunch");
+  const [recipeServings, setRecipeServings] = useState("1");
+  const [recipePrepTime, setRecipePrepTime] = useState("");
+  const [recipeIngredientRows, setRecipeIngredientRows] = useState<
+    Array<{ key: string; name: string; quantity: string; unit: string }>
+  >([{ key: createLocalDraftKey("recipe-ingredient"), name: "", quantity: "", unit: "" }]);
+  const [recipeStepRows, setRecipeStepRows] = useState<Array<{ key: string; value: string }>>([
+    { key: createLocalDraftKey("recipe-step"), value: "" },
+  ]);
+  const [recipeTagsInput, setRecipeTagsInput] = useState("");
+  const [recipeKcal, setRecipeKcal] = useState("");
+  const [recipeProtein, setRecipeProtein] = useState("");
+  const [recipeCarbs, setRecipeCarbs] = useState("");
+  const [recipeFat, setRecipeFat] = useState("");
+  const [recipeCoachFeedback, setRecipeCoachFeedback] = useState<string | null>(null);
+  const [recipeAssumptions, setRecipeAssumptions] = useState<string[]>([]);
+  const [recipeSuggestedExtras, setRecipeSuggestedExtras] = useState<string[]>([]);
+  const [recipeAiMealType, setRecipeAiMealType] = useState<RecipeMealType>("lunch");
+  const [recipeAiTargetKcal, setRecipeAiTargetKcal] = useState("");
+  const [recipeAiTargetProtein, setRecipeAiTargetProtein] = useState("");
+  const [recipeAiTargetFat, setRecipeAiTargetFat] = useState("");
+  const [recipeAiTargetCarbs, setRecipeAiTargetCarbs] = useState("");
+  const [recipeAiGoalMode, setRecipeAiGoalMode] = useState<GoalType>("maintain");
+  const [recipeAiOnlyIngredients, setRecipeAiOnlyIngredients] = useState(true);
+  const [recipeAiPantryBasics, setRecipeAiPantryBasics] = useState(true);
+  const [recipeAiAllergiesInput, setRecipeAiAllergiesInput] = useState("");
+  const [recipeAiPreferencesInput, setRecipeAiPreferencesInput] = useState("");
+  const [recipeAiIngredientRows, setRecipeAiIngredientRows] = useState<
+    Array<{ key: string; name: string; quantity: string; unit: string }>
+  >([{ key: createLocalDraftKey("ai-ingredient"), name: "", quantity: "", unit: "" }]);
+  const [recipeAiAutoFocusIngredientKey, setRecipeAiAutoFocusIngredientKey] = useState<string | null>(null);
+  const [recipeAiOptions, setRecipeAiOptions] = useState<RecipeAiOptionPreview[]>([]);
+  const [recipeAiGenerationId, setRecipeAiGenerationId] = useState<string | null>(null);
+  const [recipeAiSelectedOption, setRecipeAiSelectedOption] = useState<RecipeAiOptionPreview | null>(null);
+  const [recipeAiResult, setRecipeAiResult] = useState<RecipeAiDetailResponse | null>(null);
+  const [recipeAiKeyConfigured, setRecipeAiKeyConfigured] = useState<boolean | null>(null);
 
   const [labelName, setLabelName] = useState("");
   const [labelBrand, setLabelBrand] = useState("");
@@ -5754,6 +8576,8 @@ function AddScreen(props: {
   const [searchingFoods, setSearchingFoods] = useState(false);
   const manualSearchRequestIdRef = useRef(0);
   const lastManualSearchQueryRef = useRef("");
+  const manualSearchAbortControllerRef = useRef<AbortController | null>(null);
+  const manualSearchInFlightQueryRef = useRef("");
 
   const [method, setMethod] = useState<IntakeMethod>("grams");
   const [grams, setGrams] = useState(100);
@@ -5819,11 +8643,36 @@ function AddScreen(props: {
     setMode("hub");
   }, [resetScanState]);
 
-  const prefillFromPreference = useCallback((_nextProduct: Product, _pref: ProductPreference | null) => {
+  const prefillFromPreference = useCallback((nextProduct: Product, pref: ProductPreference | null) => {
+    if (pref?.method === "units" && pref.quantity_units && nextProduct.serving_size_g) {
+      setMethod("units");
+      setUnits(pref.quantity_units);
+      setUseDefaultSummary100g(false);
+      return;
+    }
+    if (pref?.method === "grams" && pref.quantity_g) {
+      setMethod("grams");
+      setGrams(pref.quantity_g);
+      setUseDefaultSummary100g(false);
+      return;
+    }
+    if (pref?.method === "percent_pack" && pref.percent_pack && nextProduct.net_weight_g) {
+      setMethod("percent_pack");
+      setPercentPack(pref.percent_pack);
+      setUseDefaultSummary100g(false);
+      return;
+    }
+    if (nextProduct.source === "user_recipe") {
+      setMethod("units");
+      setUnits(1);
+      setUseDefaultSummary100g(false);
+      return;
+    }
     setMethod("grams");
     setGrams(100);
     setUnits(1);
     setPercentPack(25);
+    setUseDefaultSummary100g(true);
   }, []);
 
   const loadRecentProducts = useCallback(async () => {
@@ -5851,30 +8700,150 @@ function AddScreen(props: {
     }
   }, [auth.fetchDaySummary, auth.fetchFavoriteProducts, todayKey]);
 
-  const loadMyRecipeProducts = useCallback(async () => {
+  const loadMyRecipes = useCallback(async () => {
     setLoadingMyRecipes(true);
     try {
-      const rows = await auth.fetchMyCommunityFoods(120);
-      setMyRecipeProducts(rows);
+      const rows = await auth.fetchMyRecipes({ limit: 120 });
+      setMyRecipes(rows);
     } catch (error) {
-      showAlert("Mis recetas", parseApiError(error));
-      setMyRecipeProducts([]);
+      showAlert("Crear recetas", parseApiError(error));
+      setMyRecipes([]);
     } finally {
       setLoadingMyRecipes(false);
     }
-  }, [auth.fetchMyCommunityFoods]);
+  }, [auth.fetchMyRecipes]);
+
+  const resetRecipeEditor = useCallback(
+    (backStage: "chooser" | "detail" | "ai_result" = "chooser") => {
+      setRecipeManualBackStage(backStage);
+      setRecipeDraftId(null);
+      setRecipeTitle("");
+      setRecipeMealType("lunch");
+      setRecipeServings("1");
+      setRecipePrepTime("");
+      setRecipeIngredientRows([{ key: createLocalDraftKey("recipe-ingredient"), name: "", quantity: "", unit: "" }]);
+      setRecipeStepRows([{ key: createLocalDraftKey("recipe-step"), value: "" }]);
+      setRecipeTagsInput("");
+      setRecipeKcal("");
+      setRecipeProtein("");
+      setRecipeCarbs("");
+      setRecipeFat("");
+      setRecipeCoachFeedback(null);
+      setRecipeAssumptions([]);
+      setRecipeSuggestedExtras([]);
+    },
+    [],
+  );
+
+  const resetRecipeAiBuilder = useCallback(() => {
+    setRecipeAiMealType("lunch");
+    setRecipeAiTargetKcal("");
+    setRecipeAiTargetProtein("");
+    setRecipeAiTargetFat("");
+    setRecipeAiTargetCarbs("");
+    setRecipeAiGoalMode("maintain");
+    setRecipeAiOnlyIngredients(true);
+    setRecipeAiPantryBasics(true);
+    setRecipeAiAllergiesInput("");
+    setRecipeAiPreferencesInput("");
+    setRecipeAiIngredientRows([{ key: createLocalDraftKey("ai-ingredient"), name: "", quantity: "", unit: "" }]);
+    setRecipeAiAutoFocusIngredientKey(null);
+    setRecipeAiOptions([]);
+    setRecipeAiGenerationId(null);
+    setRecipeAiSelectedOption(null);
+    setRecipeAiResult(null);
+  }, []);
+
+  const populateRecipeEditor = useCallback(
+    (
+      payload: UserRecipePayload,
+      options?: {
+        id?: number | null;
+        backStage?: "chooser" | "detail" | "ai_result";
+        coachFeedback?: string | null;
+        assumptions?: string[];
+        suggestedExtras?: string[];
+      },
+    ) => {
+      setRecipeManualBackStage(options?.backStage ?? "chooser");
+      setRecipeDraftId(options?.id ?? null);
+      setRecipeTitle(payload.title);
+      setRecipeMealType(payload.meal_type);
+      setRecipeServings(String(payload.servings));
+      setRecipePrepTime(payload.prep_time_min != null ? String(payload.prep_time_min) : "");
+      setRecipeIngredientRows(
+        payload.ingredients.length
+          ? payload.ingredients.map((item, index) => ({
+              key: createLocalDraftKey(`recipe-ingredient-${index}`),
+              name: item.name,
+              quantity: item.quantity != null ? String(item.quantity) : "",
+              unit: item.unit ?? "",
+            }))
+          : [{ key: createLocalDraftKey("recipe-ingredient"), name: "", quantity: "", unit: "" }],
+      );
+      setRecipeStepRows(
+        payload.steps.length
+          ? payload.steps.map((step, index) => ({
+              key: createLocalDraftKey(`recipe-step-${index}`),
+              value: step,
+            }))
+          : [{ key: createLocalDraftKey("recipe-step"), value: "" }],
+      );
+      setRecipeTagsInput(payload.tags.join(", "));
+      setRecipeKcal(String(payload.nutrition_kcal));
+      setRecipeProtein(String(payload.nutrition_protein_g));
+      setRecipeCarbs(String(payload.nutrition_carbs_g));
+      setRecipeFat(String(payload.nutrition_fat_g));
+      setRecipeCoachFeedback(options?.coachFeedback ?? null);
+      setRecipeAssumptions(options?.assumptions ?? []);
+      setRecipeSuggestedExtras(options?.suggestedExtras ?? []);
+    },
+    [],
+  );
+
+  const openRecipeDetail = useCallback(
+    async (recipeId: number) => {
+      setSaving(true);
+      try {
+        const recipe = await auth.fetchRecipe(recipeId);
+        setSelectedRecipe(recipe);
+        setRecipesStage("detail");
+      } catch (error) {
+        showAlert("Crear recetas", parseApiError(error));
+      } finally {
+        setSaving(false);
+      }
+    },
+    [auth.fetchRecipe],
+  );
+
+  const startRecipeManualCreation = useCallback(() => {
+    resetRecipeEditor("chooser");
+    setRecipesStage("manual");
+  }, [resetRecipeEditor]);
+
+  const startRecipeAiCreation = useCallback(async () => {
+    resetRecipeAiBuilder();
+    setRecipesStage("ai_input");
+    try {
+      const aiStatus = await auth.fetchUserAIKeyStatus();
+      setRecipeAiKeyConfigured(aiStatus.configured && aiStatus.provider === "openai");
+    } catch {
+      setRecipeAiKeyConfigured(false);
+    }
+  }, [auth.fetchUserAIKeyStatus, resetRecipeAiBuilder]);
 
   const openProductInQuantity = useCallback(
-    (nextProduct: Product, backTarget: AddBackTarget = "hub") => {
+    (nextProduct: Product, backTarget: AddBackTarget = "hub", pref: ProductPreference | null = null) => {
       setShowScannedProductImage(false);
       setQuantityBackTarget(backTarget);
       setProduct(nextProduct);
-      setPreferredServing(null);
+      setPreferredServing(pref);
       setLabelName(nextProduct.name);
       setLabelBrand(nextProduct.brand ?? "");
       setMode("barcode");
       setPhase("quantity");
-      prefillFromPreference(nextProduct, null);
+      prefillFromPreference(nextProduct, pref);
     },
     [prefillFromPreference],
   );
@@ -6023,6 +8992,11 @@ function AddScreen(props: {
   const startRecipesFlow = () => {
     resetScanState();
     setQuantityBackTarget("recipes");
+    setRecipesStage("chooser");
+    setSelectedRecipe(null);
+    setRecipeSearch("");
+    resetRecipeEditor("chooser");
+    resetRecipeAiBuilder();
     setMode("recipes");
   };
 
@@ -6825,12 +9799,20 @@ function AddScreen(props: {
         return;
       }
 
+      if (searchingFoods && manualSearchInFlightQueryRef.current === query) {
+        return;
+      }
+
       const requestId = manualSearchRequestIdRef.current + 1;
       manualSearchRequestIdRef.current = requestId;
+      manualSearchAbortControllerRef.current?.abort();
+      const abortController = typeof AbortController !== "undefined" ? new AbortController() : null;
+      manualSearchAbortControllerRef.current = abortController;
+      manualSearchInFlightQueryRef.current = query;
       setManualHasSearched(true);
       setSearchingFoods(true);
       try {
-        const response = await auth.searchFoods(query);
+        const response = await auth.searchFoods(query, 20, abortController?.signal);
         if (manualSearchRequestIdRef.current !== requestId) {
           return;
         }
@@ -6840,16 +9822,23 @@ function AddScreen(props: {
         if (manualSearchRequestIdRef.current !== requestId) {
           return;
         }
+        if (isAbortRequestError(error)) {
+          return;
+        }
         if (!options?.silent) {
           showAlert("Buscar", parseApiError(error));
         }
       } finally {
         if (manualSearchRequestIdRef.current === requestId) {
+          if (manualSearchAbortControllerRef.current === abortController) {
+            manualSearchAbortControllerRef.current = null;
+            manualSearchInFlightQueryRef.current = "";
+          }
           setSearchingFoods(false);
         }
       }
     },
-    [auth, manualSearch],
+    [auth, manualSearch, searchingFoods],
   );
 
   const selectManualResult = async (item: FoodSearchItem) => {
@@ -6962,6 +9951,320 @@ function AddScreen(props: {
       showAlert("Manual", "Producto compartido en la base comunitaria.");
     } catch (error) {
       showAlert("Manual", parseApiError(error));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const filteredRecipes = useMemo(() => {
+    const query = recipeSearch.trim().toLowerCase();
+    if (!query) {
+      return myRecipes;
+    }
+    return myRecipes.filter((recipe) => {
+      const haystack = [
+        recipe.title,
+        recipeMealTypeLabel(recipe.meal_type),
+        recipe.tags.join(" "),
+        recipe.ingredients.map((item) => item.name).join(" "),
+      ]
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(query);
+    });
+  }, [myRecipes, recipeSearch]);
+
+  const recipeAiDesktopLayout = Platform.OS === "web" && width >= 1180;
+  const recipeAiStickyCardStyle = useMemo(
+    () =>
+      Platform.OS === "web"
+        ? ({ position: "sticky", top: WEB_CHROME_TOTAL_HEIGHT + 18 } as unknown as ViewStyle)
+        : undefined,
+    [],
+  );
+  const recipeAiFilledIngredientCount = useMemo(
+    () => recipeAiIngredientRows.filter((row) => row.name.trim()).length,
+    [recipeAiIngredientRows],
+  );
+  const recipeAiHasAnyIngredientData = useMemo(
+    () => recipeAiIngredientRows.some((row) => row.name.trim() || row.quantity.trim() || row.unit.trim()),
+    [recipeAiIngredientRows],
+  );
+  const recipeAiRestrictionSummary = useMemo(() => {
+    const items: string[] = [];
+    items.push(recipeAiOnlyIngredients ? "Solo usa lo listado" : "Puede proponer extras");
+    if (recipeAiPantryBasics) {
+      items.push("Básicos permitidos");
+    }
+    if (recipeAiAllergiesInput.trim()) {
+      items.push("Alergias definidas");
+    }
+    if (recipeAiPreferencesInput.trim()) {
+      items.push("Preferencias activas");
+    }
+    return items;
+  }, [recipeAiAllergiesInput, recipeAiOnlyIngredients, recipeAiPantryBasics, recipeAiPreferencesInput]);
+
+  useEffect(() => {
+    if (!recipeAiAutoFocusIngredientKey) {
+      return;
+    }
+    const timer = setTimeout(() => setRecipeAiAutoFocusIngredientKey(null), 350);
+    return () => clearTimeout(timer);
+  }, [recipeAiAutoFocusIngredientKey]);
+
+  const appendRecipeAiIngredientRow = useCallback(() => {
+    const nextKey = createLocalDraftKey("ai-ingredient");
+    setRecipeAiIngredientRows((current) => [...current, { key: nextKey, name: "", quantity: "", unit: "" }]);
+    setRecipeAiAutoFocusIngredientKey(nextKey);
+  }, []);
+
+  const buildRecipePayloadFromEditor = useCallback((): UserRecipePayload | null => {
+    const title = recipeTitle.trim();
+    const servings = Number(recipeServings.trim().replace(",", "."));
+    const prepTime = recipePrepTime.trim() ? Number(recipePrepTime.trim().replace(",", ".")) : null;
+    const kcal = Number(recipeKcal.trim().replace(",", "."));
+    const protein = Number(recipeProtein.trim().replace(",", "."));
+    const carbs = Number(recipeCarbs.trim().replace(",", "."));
+    const fat = Number(recipeFat.trim().replace(",", "."));
+    const ingredients = recipeIngredientRows
+      .map((item) => ({
+        name: item.name.trim(),
+        quantity: item.quantity.trim() ? toOptionalNumber(item.quantity) : null,
+        unit: item.unit.trim() || null,
+      }))
+      .filter((item) => item.name);
+    const steps = recipeStepRows.map((item) => item.value.trim()).filter(Boolean);
+    const tags = recipeTagsInput
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+
+    if (!title) {
+      showAlert("Crear recetas", "El título es obligatorio.");
+      return null;
+    }
+    if (!Number.isFinite(servings) || servings < 1) {
+      showAlert("Crear recetas", "Las raciones deben ser un número válido.");
+      return null;
+    }
+    if (prepTime != null && (!Number.isFinite(prepTime) || prepTime < 0)) {
+      showAlert("Crear recetas", "El tiempo estimado no tiene buena pinta.");
+      return null;
+    }
+    if (!ingredients.length) {
+      showAlert("Crear recetas", "Añade al menos un ingrediente.");
+      return null;
+    }
+    if (!steps.length) {
+      showAlert("Crear recetas", "Añade al menos un paso.");
+      return null;
+    }
+    if (![kcal, protein, carbs, fat].every((value) => Number.isFinite(value) && value >= 0)) {
+      showAlert("Crear recetas", "Completa kcal, proteína, hidratos y grasas para poder guardarla.");
+      return null;
+    }
+
+    return {
+      title,
+      meal_type: recipeMealType,
+      servings: Math.round(servings),
+      prep_time_min: prepTime == null ? null : Math.round(prepTime),
+      ingredients,
+      steps,
+      tags,
+      nutrition_kcal: kcal,
+      nutrition_protein_g: protein,
+      nutrition_carbs_g: carbs,
+      nutrition_fat_g: fat,
+    };
+  }, [
+    recipeCarbs,
+    recipeFat,
+    recipeIngredientRows,
+    recipeKcal,
+    recipeMealType,
+    recipePrepTime,
+    recipeProtein,
+    recipeServings,
+    recipeStepRows,
+    recipeTagsInput,
+    recipeTitle,
+  ]);
+
+  const saveRecipeDraft = async () => {
+    const payload = buildRecipePayloadFromEditor();
+    if (!payload) {
+      return;
+    }
+    const payloadWithDefault =
+      recipeManualBackStage === "ai_result"
+        ? { ...payload, default_quantity_units: payload.servings }
+        : selectedRecipe?.id === recipeDraftId && selectedRecipe.preferred_serving?.method === "units"
+          ? { ...payload, default_quantity_units: selectedRecipe.preferred_serving.quantity_units ?? payload.servings }
+          : payload;
+
+    setSaving(true);
+    try {
+      const response = recipeDraftId
+        ? await auth.updateRecipe(recipeDraftId, payloadWithDefault)
+        : await auth.createRecipe(payloadWithDefault);
+      setSelectedRecipe(response);
+      setRecipesStage("detail");
+      lastRecipesRefreshRef.current = 0;
+      await loadMyRecipes();
+      showAlert("Crear recetas", recipeDraftId ? "Receta actualizada." : "Receta guardada.");
+    } catch (error) {
+      showAlert("Crear recetas", parseApiError(error));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const runRecipeGenerator = async () => {
+    if (recipeAiKeyConfigured === false) {
+      showAlert("IA", "Configura tu API key de OpenAI en Ajustes > IA para generar recetas.");
+      return;
+    }
+
+    const availableIngredients = recipeAiIngredientRows
+      .map((item) => ({
+        name: item.name.trim(),
+        quantity: item.quantity.trim() ? toOptionalNumber(item.quantity) : null,
+        unit: item.unit.trim() || null,
+      }))
+      .filter((item) => item.name);
+
+    if (!availableIngredients.length) {
+      showAlert("Crear recetas", "Añade al menos un ingrediente disponible.");
+      return;
+    }
+
+    setSaving(true);
+    setRecipeAiOptions([]);
+    setRecipeAiGenerationId(null);
+    setRecipeAiSelectedOption(null);
+    setRecipeAiResult(null);
+    setRecipesStage("ai_options");
+    try {
+      const response = await auth.generateRecipeOptions({
+        meal_type: recipeAiMealType,
+        target_kcal: toOptionalNumber(recipeAiTargetKcal) ?? undefined,
+        target_protein_g: toOptionalNumber(recipeAiTargetProtein) ?? undefined,
+        target_fat_g: toOptionalNumber(recipeAiTargetFat) ?? undefined,
+        target_carbs_g: toOptionalNumber(recipeAiTargetCarbs) ?? undefined,
+        goal_mode: recipeAiGoalMode,
+        use_only_ingredients: recipeAiOnlyIngredients,
+        allergies: recipeAiAllergiesInput
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean),
+        preferences: recipeAiPreferencesInput
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean),
+        available_ingredients: availableIngredients,
+        allow_basic_pantry: recipeAiPantryBasics,
+        locale: language,
+      });
+      setRecipeAiGenerationId(response.generation_id);
+      setRecipeAiOptions(response.options);
+      setRecipesStage("ai_options");
+    } catch (error) {
+      setRecipesStage("ai_input");
+      showAlert("Crear recetas", parseApiError(error));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const openRecipeAiDetail = useCallback(
+    async (option: RecipeAiOptionPreview) => {
+      if (!recipeAiGenerationId) {
+        showAlert("Crear recetas", "La generación actual ya no está disponible. Vuelve a generar opciones.");
+        return;
+      }
+      setSaving(true);
+      setRecipeAiSelectedOption(option);
+      setRecipeAiResult(null);
+      setRecipesStage("ai_result");
+      try {
+        const response = await auth.fetchRecipeAiDetail({
+          generation_id: recipeAiGenerationId,
+          option_id: option.option_id,
+        });
+        setRecipeAiResult(response);
+        setRecipesStage("ai_result");
+      } catch (error) {
+        setRecipesStage("ai_options");
+        showAlert("Crear recetas", parseApiError(error));
+      } finally {
+        setSaving(false);
+      }
+    },
+    [auth.fetchRecipeAiDetail, recipeAiGenerationId],
+  );
+
+  const editSelectedRecipe = useCallback(
+    (recipe: UserRecipe) => {
+      populateRecipeEditor(
+        {
+          title: recipe.title,
+          meal_type: recipe.meal_type,
+          servings: recipe.servings,
+          prep_time_min: recipe.prep_time_min,
+          ingredients: recipe.ingredients,
+          steps: recipe.steps,
+          tags: recipe.tags,
+          nutrition_kcal: recipe.nutrition_kcal,
+          nutrition_protein_g: recipe.nutrition_protein_g,
+          nutrition_carbs_g: recipe.nutrition_carbs_g,
+          nutrition_fat_g: recipe.nutrition_fat_g,
+        },
+        {
+          id: recipe.id,
+          backStage: "detail",
+          coachFeedback: recipe.coach_feedback,
+          assumptions: recipe.assumptions,
+          suggestedExtras: recipe.suggested_extras,
+        },
+      );
+      setRecipesStage("manual");
+    },
+    [populateRecipeEditor],
+  );
+
+  const editRecipeFromAiResult = useCallback(() => {
+    if (!recipeAiResult) {
+      return;
+    }
+    populateRecipeEditor(recipeAiResult.recipe, {
+      backStage: "ai_result",
+      coachFeedback: recipeAiResult.feedback.summary,
+      assumptions: recipeAiResult.assumptions,
+      suggestedExtras: recipeAiResult.feedback.suggested_extras,
+    });
+    setRecipesStage("manual");
+  }, [populateRecipeEditor, recipeAiResult]);
+
+  const saveRecipeFromAiResult = async () => {
+    if (!recipeAiResult) {
+      return;
+    }
+    const generatedPayload = {
+      ...recipeAiResult.recipe,
+      default_quantity_units: recipeAiResult.recipe.servings,
+    };
+    setSaving(true);
+    try {
+      const response = await auth.createRecipe(generatedPayload);
+      setSelectedRecipe(response);
+      setRecipesStage("detail");
+      lastRecipesRefreshRef.current = 0;
+      await loadMyRecipes();
+      showAlert("Crear recetas", "Receta IA guardada.");
+    } catch (error) {
+      showAlert("Crear recetas", parseApiError(error));
     } finally {
       setSaving(false);
     }
@@ -7101,11 +10404,24 @@ function AddScreen(props: {
 
   useEffect(() => {
     if (mode !== "manual") {
+      manualSearchAbortControllerRef.current?.abort();
+      manualSearchAbortControllerRef.current = null;
+      manualSearchInFlightQueryRef.current = "";
+      setSearchingFoods(false);
       return;
     }
     const query = manualSearch.trim();
+    if (manualSearchInFlightQueryRef.current && manualSearchInFlightQueryRef.current !== query) {
+      manualSearchAbortControllerRef.current?.abort();
+      manualSearchAbortControllerRef.current = null;
+      manualSearchInFlightQueryRef.current = "";
+      setSearchingFoods(false);
+    }
     if (query.length < 2) {
       manualSearchRequestIdRef.current += 1;
+      manualSearchAbortControllerRef.current?.abort();
+      manualSearchAbortControllerRef.current = null;
+      manualSearchInFlightQueryRef.current = "";
       setSearchingFoods(false);
       if (!query) {
         setManualResults([]);
@@ -7123,6 +10439,12 @@ function AddScreen(props: {
   }, [manualSearch, mode, searchManualFoods]);
 
   useEffect(() => {
+    return () => {
+      manualSearchAbortControllerRef.current?.abort();
+    };
+  }, []);
+
+  useEffect(() => {
     if (mode !== "recipes") {
       return;
     }
@@ -7131,8 +10453,8 @@ function AddScreen(props: {
       return;
     }
     lastRecipesRefreshRef.current = now;
-    void loadMyRecipeProducts();
-  }, [loadMyRecipeProducts, mode]);
+    void loadMyRecipes();
+  }, [loadMyRecipes, mode]);
 
   useEffect(() => {
     if (!toastFeedback) {
@@ -7170,28 +10492,24 @@ function AddScreen(props: {
     setMethod(nextMethod);
   }, []);
 
-  const searchBadgeTone = useCallback((badge: FoodSearchItem["badge"]): "default" | "accent" | "warning" | "danger" => {
-    if (badge === "Verificado") {
-      return "accent";
+  const renderSearchResultStatus = useCallback((item: FoodSearchItem) => {
+    if (item.badge === "Verificado") {
+      return (
+        <View style={styles.searchVerifiedIconWrap}>
+          <VerifiedTickIcon />
+        </View>
+      );
     }
-    if (badge === "Estimado") {
-      return "warning";
-    }
-    if (badge === "Comunidad") {
-      return "default";
-    }
-    return "default";
-  }, []);
 
-  const isUserCreatedProduct = useCallback((item: FoodSearchItem): boolean => {
-    if (item.origin !== "local") {
-      return false;
+    if (item.badge === "Comunidad") {
+      return <TagChip label="Comunidad" tone="default" />;
     }
-    const source = (item.product.source ?? "").toLowerCase();
-    if (source.includes("openfoodfacts") || source === "off") {
-      return false;
+
+    if (item.badge === "Estimado") {
+      return <TagChip label="Estimado" tone="warning" />;
     }
-    return item.badge === "Comunidad" && item.product.created_by_user_id !== null;
+
+    return null;
   }, []);
 
   const goBackInAdd = useCallback(() => {
@@ -7234,6 +10552,22 @@ function AddScreen(props: {
     }
 
     if (mode === "recipes") {
+      if (recipesStage === "manual") {
+        setRecipesStage(recipeManualBackStage);
+        return;
+      }
+      if (recipesStage === "ai_result") {
+        setRecipesStage(recipeAiOptions.length ? "ai_options" : "ai_input");
+        return;
+      }
+      if (recipesStage === "ai_options") {
+        setRecipesStage("ai_input");
+        return;
+      }
+      if (recipesStage === "detail" || recipesStage === "ai_input") {
+        setRecipesStage("chooser");
+        return;
+      }
       resetToHub();
       return;
     }
@@ -7283,7 +10617,19 @@ function AddScreen(props: {
         resetToHub();
       }
     }
-  }, [mealStep, mode, phase, processing, quantityBackTarget, resetToHub, saving, showManualCreateForm]);
+  }, [
+    mealStep,
+    mode,
+    phase,
+    processing,
+    quantityBackTarget,
+    recipeAiOptions.length,
+    recipeManualBackStage,
+    recipesStage,
+    resetToHub,
+    saving,
+    showManualCreateForm,
+  ]);
 
   const subtitle =
     mode === "hub"
@@ -7295,7 +10641,7 @@ function AddScreen(props: {
           : mode === "meal_photo"
             ? "Estimación guiada de plato por foto + descripción"
             : mode === "recipes"
-            ? "Tus recetas y alimentos reutilizables"
+            ? "Crear, guardar y reutilizar recetas propias"
             : "Búsqueda manual por nombre o marca";
   const isQuantityScreen = mode === "barcode" && phase === "quantity" && !!product;
   const addHeaderTitle = isQuantityScreen ? "Añadir alimento" : "Añadir";
@@ -7359,8 +10705,8 @@ function AddScreen(props: {
               onPress={() => void startBarcodeFlow()}
             />
             <AddActionCard
-              title="Mis recetas"
-              subtitle="Reutiliza tus recetas o productos frecuentes"
+              title="Crear recetas"
+              subtitle="Usa una existente o crea una nueva manual/IA"
               onPress={startRecipesFlow}
             />
             <AddActionCard
@@ -7965,8 +11311,7 @@ function AddScreen(props: {
                         </Text>
                       </View>
                       <View style={styles.searchResultBadgeWrap}>
-                        <TagChip label={item.badge} tone={searchBadgeTone(item.badge)} />
-                        {isUserCreatedProduct(item) ? <TagChip label="Creado por usuario" tone="default" /> : null}
+                        {renderSearchResultStatus(item)}
                         <Text style={styles.inlineRowChevron}>›</Text>
                       </View>
                     </Pressable>
@@ -8007,51 +11352,959 @@ function AddScreen(props: {
 
         {mode === "recipes" ? (
           <ScrollView contentContainerStyle={styles.scanPane} keyboardShouldPersistTaps="handled">
-            <View style={styles.sectionCard}>
-              <Text style={styles.sectionTitle}>Mis recetas</Text>
-              <Text style={styles.helperText}>Aquí ves los productos que has creado tú.</Text>
-              <PrimaryButton title="Crear receta" onPress={startManualCreateFlow} />
+            {recipesStage === "chooser" ? (
+              <>
+                <View style={styles.sectionCard}>
+                  <Text style={styles.sectionTitle}>Crear recetas</Text>
+                  <Text style={styles.helperText}>
+                    Reutiliza una receta tuya o crea una nueva con un flujo más limpio que el invento anterior.
+                  </Text>
+                </View>
 
-              {loadingMyRecipes ? (
-                <ActivityIndicator color={theme.accent} />
-              ) : null}
+                <View style={styles.sectionCard}>
+                  <SectionHeader
+                    title="Usar una receta existente"
+                    subtitle="Busca entre tus recetas y abre el detalle para añadirla al día."
+                  />
+                  <InputField
+                    label="Buscar por nombre"
+                    value={recipeSearch}
+                    onChangeText={setRecipeSearch}
+                    placeholder="Ej: tortillas, bowl, avena..."
+                  />
+                  {loadingMyRecipes ? <ActivityIndicator color={theme.accent} /> : null}
+                  {filteredRecipes.length ? (
+                    <View style={styles.recipePreviewList}>
+                      {filteredRecipes.map((recipe) => (
+                        <Pressable
+                          key={recipe.id}
+                          style={styles.recipePreviewRow}
+                          onPress={() => void openRecipeDetail(recipe.id)}
+                        >
+                          <View style={styles.recipePreviewImagePlaceholder}>
+                            <Text style={styles.recipePreviewImagePlaceholderText}>R</Text>
+                          </View>
+                          <View style={styles.recipePreviewTextWrap}>
+                            <Text style={styles.recipePreviewTitle}>{recipe.title}</Text>
+                            <Text style={styles.recipePreviewSubtitle}>
+                              {recipeMealTypeLabel(recipe.meal_type)} · {recipe.servings} raciones
+                            </Text>
+                            <Text style={styles.recipePreviewMacroLine}>
+                              {Math.round(recipe.nutrition_kcal)} kcal · P {Math.round(recipe.nutrition_protein_g * 10) / 10} · C{" "}
+                              {Math.round(recipe.nutrition_carbs_g * 10) / 10} · G {Math.round(recipe.nutrition_fat_g * 10) / 10}
+                            </Text>
+                          </View>
+                          <Text style={styles.inlineRowChevron}>›</Text>
+                        </Pressable>
+                      ))}
+                    </View>
+                  ) : null}
 
-              {myRecipeProducts.length ? (
-                <View style={styles.recipePreviewList}>
-                  {myRecipeProducts.map((item) => (
-                    <Pressable
-                      key={item.id}
-                      style={styles.recipePreviewRow}
-                      onPress={() => openProductInQuantity(item, "recipes")}
-                    >
-                      {item.image_url ? (
-                        <Image source={{ uri: item.image_url }} style={styles.recipePreviewImage} resizeMode="cover" />
-                      ) : (
-                        <View style={styles.recipePreviewImagePlaceholder}>
-                          <Text style={styles.recipePreviewImagePlaceholderText}>R</Text>
-                        </View>
-                      )}
-                      <View style={styles.recipePreviewTextWrap}>
-                        <Text style={styles.recipePreviewTitle}>{item.name}</Text>
-                        <Text style={styles.recipePreviewSubtitle}>{item.brand ?? "Sin marca"}</Text>
-                        <Text style={styles.recipePreviewMacroLine}>
-                          {Math.round(item.kcal)} kcal · P {Math.round(item.protein_g * 10) / 10} · C{" "}
-                          {Math.round(item.carbs_g * 10) / 10} · G {Math.round(item.fat_g * 10) / 10}
-                        </Text>
-                      </View>
-                      <Text style={styles.inlineRowChevron}>›</Text>
+                  {!loadingMyRecipes && !filteredRecipes.length ? (
+                    <EmptyState
+                      title={recipeSearch.trim() ? "No encaja ninguna receta" : "Sin recetas todavía"}
+                      subtitle={
+                        recipeSearch.trim()
+                          ? "Prueba otro nombre o crea una nueva."
+                          : "Crea tu primera receta manualmente o deja que la IA haga el trabajo sucio."
+                      }
+                    />
+                  ) : null}
+                </View>
+
+                <View style={styles.sectionCard}>
+                  <SectionHeader
+                    title="Crear una nueva receta"
+                    subtitle="Elige si quieres montarla a mano o generar una versión base con IA."
+                  />
+                  <View style={styles.recipeChoiceGrid}>
+                    <Pressable style={styles.recipeChoiceCard} onPress={startRecipeManualCreation}>
+                      <Text style={styles.recipeChoiceTitle}>Crear manualmente</Text>
+                      <Text style={styles.recipeChoiceText}>
+                        Título, tipo de comida, ingredientes, pasos, raciones y macros por ración.
+                      </Text>
                     </Pressable>
+                    <Pressable style={styles.recipeChoiceCard} onPress={() => void startRecipeAiCreation()}>
+                      <Text style={styles.recipeChoiceTitle}>Generar con IA</Text>
+                      <Text style={styles.recipeChoiceText}>
+                        Dile qué tienes, tu objetivo y deja que proponga receta, macros y feedback útil.
+                      </Text>
+                    </Pressable>
+                  </View>
+                </View>
+              </>
+            ) : null}
+
+            {recipesStage === "detail" && selectedRecipe ? (
+              <View style={styles.sectionCard}>
+                <Text style={styles.sectionTitle}>{selectedRecipe.title}</Text>
+                <Text style={styles.helperText}>
+                  {recipeMealTypeLabel(selectedRecipe.meal_type)} · {selectedRecipe.servings} raciones
+                  {selectedRecipe.prep_time_min ? ` · ${selectedRecipe.prep_time_min} min` : ""}
+                </Text>
+                <View style={styles.tagRow}>
+                  <TagChip label={recipeMealTypeLabel(selectedRecipe.meal_type)} tone="accent" />
+                  {selectedRecipe.tags.map((tag) => (
+                    <TagChip key={tag} label={tag} tone="default" />
                   ))}
                 </View>
-              ) : null}
-
-              {!loadingMyRecipes && !myRecipeProducts.length ? (
-                <EmptyState
-                  title="Sin recetas todavía"
-                  subtitle="Crea tu primer producto y aparecerá aquí automáticamente."
+                <AddQuantityMacroSummary
+                  kcal={selectedRecipe.nutrition_kcal}
+                  protein={selectedRecipe.nutrition_protein_g}
+                  carbs={selectedRecipe.nutrition_carbs_g}
+                  fats={selectedRecipe.nutrition_fat_g}
                 />
-              ) : null}
-            </View>
+
+                <SectionHeader title="Ingredientes" />
+                <View style={styles.recipeBulletList}>
+                  {selectedRecipe.ingredients.map((ingredient, index) => (
+                    <Text key={`${ingredient.name}-${index}`} style={styles.helperText}>
+                      · {ingredient.name}
+                      {ingredient.quantity != null ? ` · ${ingredient.quantity}` : ""}
+                      {ingredient.unit ? ` ${ingredient.unit}` : ""}
+                    </Text>
+                  ))}
+                </View>
+
+                <SectionHeader title="Pasos" />
+                <View style={styles.recipeBulletList}>
+                  {selectedRecipe.steps.map((step, index) => (
+                    <Text key={`${selectedRecipe.id}-step-${index}`} style={styles.helperText}>
+                      {index + 1}. {step}
+                    </Text>
+                  ))}
+                </View>
+
+                {selectedRecipe.coach_feedback ? (
+                  <>
+                    <SectionHeader title="Feedback" subtitle="Notas guardadas con la receta" />
+                    <View style={styles.recipeFeedbackCard}>
+                      <Text style={styles.helperText}>{selectedRecipe.coach_feedback}</Text>
+                      {selectedRecipe.assumptions.map((item) => (
+                        <Text key={item} style={styles.helperText}>
+                          · {item}
+                        </Text>
+                      ))}
+                      {selectedRecipe.suggested_extras.map((item) => (
+                        <Text key={`extra-${item}`} style={styles.helperText}>
+                          · Podría mejorar con: {item}
+                        </Text>
+                      ))}
+                    </View>
+                  </>
+                ) : null}
+
+                <PrimaryButton
+                  title="Añadir al día"
+                  onPress={() => openProductInQuantity(selectedRecipe.product, "recipes", selectedRecipe.preferred_serving)}
+                />
+                <SecondaryButton title="Editar receta" onPress={() => editSelectedRecipe(selectedRecipe)} disabled={saving} />
+              </View>
+            ) : null}
+
+            {recipesStage === "manual" ? (
+              <View style={styles.sectionCard}>
+                <Text style={styles.sectionTitle}>{recipeDraftId ? "Editar receta" : "Crear receta manualmente"}</Text>
+                <Text style={styles.helperText}>
+                  Guarda una receta reutilizable con estructura real. Nada de producto manual disfrazado.
+                </Text>
+                <InputField label="Título" value={recipeTitle} onChangeText={setRecipeTitle} placeholder="Ej: Bowl proteico de atún" />
+
+                <Text style={styles.fieldLabel}>Tipo de comida</Text>
+                <View style={styles.methodRow}>
+                  {(["breakfast", "brunch", "lunch", "snack", "dinner"] as RecipeMealType[]).map((item) => {
+                    const active = recipeMealType === item;
+                    return (
+                      <Pressable
+                        key={item}
+                        style={[styles.methodChip, active && styles.methodChipActive]}
+                        onPress={() => setRecipeMealType(item)}
+                      >
+                        <Text style={[styles.methodChipText, active && styles.methodChipTextActive]}>
+                          {recipeMealTypeLabel(item)}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+
+                <View style={styles.recipeEditorGrid}>
+                  <InputField label="Raciones" value={recipeServings} onChangeText={setRecipeServings} keyboardType="numeric" />
+                  <InputField
+                    label="Tiempo estimado (min)"
+                    value={recipePrepTime}
+                    onChangeText={setRecipePrepTime}
+                    keyboardType="numeric"
+                  />
+                </View>
+
+                <SectionHeader title="Ingredientes" subtitle="Nombre, cantidad y unidad." />
+                {recipeIngredientRows.map((row, index) => (
+                  <View key={row.key} style={styles.recipeEditorRow}>
+                    <View style={styles.recipeEditorPrimaryField}>
+                      <InputField
+                        label={`Ingrediente ${index + 1}`}
+                        value={row.name}
+                        onChangeText={(value) =>
+                          setRecipeIngredientRows((current) =>
+                            current.map((item) => (item.key === row.key ? { ...item, name: value } : item)),
+                          )
+                        }
+                        placeholder="Ej: avena"
+                      />
+                    </View>
+                    <View style={styles.recipeEditorCompactField}>
+                      <InputField
+                        label="Cantidad"
+                        value={row.quantity}
+                        onChangeText={(value) =>
+                          setRecipeIngredientRows((current) =>
+                            current.map((item) => (item.key === row.key ? { ...item, quantity: value } : item)),
+                          )
+                        }
+                        keyboardType="numeric"
+                        placeholder="80"
+                      />
+                    </View>
+                    <View style={styles.recipeEditorCompactField}>
+                      <InputField
+                        label="Unidad"
+                        value={row.unit}
+                        onChangeText={(value) =>
+                          setRecipeIngredientRows((current) =>
+                            current.map((item) => (item.key === row.key ? { ...item, unit: value } : item)),
+                          )
+                        }
+                        placeholder="g"
+                      />
+                    </View>
+                    {recipeIngredientRows.length > 1 ? (
+                      <Pressable
+                        style={styles.recipeRowRemove}
+                        onPress={() => setRecipeIngredientRows((current) => current.filter((item) => item.key !== row.key))}
+                      >
+                        <Text style={styles.recipeRowRemoveText}>Quitar</Text>
+                      </Pressable>
+                    ) : null}
+                  </View>
+                ))}
+                <SecondaryButton
+                  title="Añadir ingrediente"
+                  onPress={() =>
+                    setRecipeIngredientRows((current) => [
+                      ...current,
+                      { key: createLocalDraftKey("recipe-ingredient"), name: "", quantity: "", unit: "" },
+                    ])
+                  }
+                />
+
+                <SectionHeader title="Pasos" subtitle="Lista breve y clara." />
+                {recipeStepRows.map((row, index) => (
+                  <View key={row.key} style={styles.recipeStepRow}>
+                    <View style={styles.recipeEditorPrimaryField}>
+                      <InputField
+                        label={`Paso ${index + 1}`}
+                        value={row.value}
+                        onChangeText={(value) =>
+                          setRecipeStepRows((current) =>
+                            current.map((item) => (item.key === row.key ? { ...item, value } : item)),
+                          )
+                        }
+                        placeholder="Ej: mezcla y cocina"
+                      />
+                    </View>
+                    {recipeStepRows.length > 1 ? (
+                      <Pressable
+                        style={styles.recipeRowRemove}
+                        onPress={() => setRecipeStepRows((current) => current.filter((item) => item.key !== row.key))}
+                      >
+                        <Text style={styles.recipeRowRemoveText}>Quitar</Text>
+                      </Pressable>
+                    ) : null}
+                  </View>
+                ))}
+                <SecondaryButton
+                  title="Añadir paso"
+                  onPress={() =>
+                    setRecipeStepRows((current) => [...current, { key: createLocalDraftKey("recipe-step"), value: "" }])
+                  }
+                />
+
+                <InputField
+                  label="Tags (separados por comas)"
+                  value={recipeTagsInput}
+                  onChangeText={setRecipeTagsInput}
+                  placeholder="high protein, vegetariana..."
+                />
+
+                <SectionHeader title="Macros por ración" subtitle="Necesarios para poder reutilizar la receta al añadirla al día." />
+                <View style={styles.mealEditableGrid}>
+                  <InputField label="Kcal" value={recipeKcal} onChangeText={setRecipeKcal} keyboardType="numeric" />
+                  <InputField
+                    label="Proteína (g)"
+                    value={recipeProtein}
+                    onChangeText={setRecipeProtein}
+                    keyboardType="numeric"
+                  />
+                  <InputField
+                    label="Carbohidratos (g)"
+                    value={recipeCarbs}
+                    onChangeText={setRecipeCarbs}
+                    keyboardType="numeric"
+                  />
+                  <InputField label="Grasas (g)" value={recipeFat} onChangeText={setRecipeFat} keyboardType="numeric" />
+                </View>
+
+                {recipeCoachFeedback ? (
+                  <View style={styles.recipeFeedbackCard}>
+                    <Text style={styles.sectionTitle}>Feedback / Coach</Text>
+                    <Text style={styles.helperText}>{recipeCoachFeedback}</Text>
+                    {recipeAssumptions.map((item) => (
+                      <Text key={item} style={styles.helperText}>
+                        · {item}
+                      </Text>
+                    ))}
+                    {recipeSuggestedExtras.map((item) => (
+                      <Text key={`recipe-editor-extra-${item}`} style={styles.helperText}>
+                        · Mejoraría con: {item}
+                      </Text>
+                    ))}
+                  </View>
+                ) : null}
+
+                <PrimaryButton title={recipeDraftId ? "Guardar cambios" : "Guardar receta"} onPress={() => void saveRecipeDraft()} loading={saving} />
+                {recipeManualBackStage === "ai_result" ? (
+                  <SecondaryButton title="Volver al resultado IA" onPress={() => setRecipesStage("ai_result")} disabled={saving} />
+                ) : null}
+              </View>
+            ) : null}
+
+            {recipesStage === "ai_input" ? (
+              <View style={styles.recipeAiScreen}>
+                <View style={[styles.sectionCard, styles.recipeAiHeroCard]}>
+                  <Text style={styles.recipeAiEyebrow}>Crear recetas · IA</Text>
+                  <Text style={styles.recipeAiHeroTitle}>Genera una base útil con lo que tienes a mano</Text>
+                  <Text style={styles.recipeAiHeroText}>
+                    Define contexto, objetivo e ingredientes. La IA te devuelve una receta completa con macros y feedback que luego
+                    puedes revisar antes de guardarla.
+                  </Text>
+                </View>
+
+                {recipeAiKeyConfigured === null ? (
+                  <View style={[styles.sectionCard, styles.recipeAiLoadingCard]}>
+                    <ActivityIndicator color={theme.accent} />
+                    <Text style={styles.helperText}>Comprobando si tu clave de IA está lista.</Text>
+                  </View>
+                ) : null}
+
+                {recipeAiKeyConfigured === false ? (
+                  <View style={[styles.sectionCard, styles.recipeAiUnavailableCard]}>
+                    <Text style={styles.recipeAiSectionTitle}>IA no configurada</Text>
+                    <Text style={styles.helperText}>
+                      Configura tu API key de OpenAI en Ajustes &gt; IA para usar este generador y no depender de la imaginación.
+                    </Text>
+                    <SecondaryButton
+                      title="Recordarme dónde está"
+                      onPress={() => showAlert("IA", "La configuración está en Ajustes > IA. Sí, escondida donde suelen esconderla estas cosas.")}
+                    />
+                  </View>
+                ) : null}
+
+                {recipeAiKeyConfigured ? (
+                  <View style={[styles.recipeAiLayout, recipeAiDesktopLayout && styles.recipeAiLayoutDesktop]}>
+                    <View style={styles.recipeAiMainColumn}>
+                      <View style={[styles.sectionCard, styles.recipeAiSectionCard]}>
+                        <View style={styles.recipeAiSectionHeader}>
+                          <Text style={styles.recipeAiSectionTitle}>Tipo de comida</Text>
+                          <Text style={styles.recipeAiSectionHelper}>
+                            Le da contexto a la receta y ajusta mejor raciones, tono y estructura.
+                          </Text>
+                        </View>
+                        <View style={styles.recipeAiChipRow}>
+                          {(["breakfast", "brunch", "lunch", "snack", "dinner"] as RecipeMealType[]).map((item) => {
+                            const active = recipeAiMealType === item;
+                            return (
+                              <Pressable
+                                key={item}
+                                disabled={saving}
+                                onPress={() => setRecipeAiMealType(item)}
+                                style={({ pressed }) => [
+                                  styles.recipeAiChip,
+                                  active && styles.recipeAiChipActive,
+                                  pressed && !saving && styles.recipeAiChipPressed,
+                                  saving && styles.recipeAiChipDisabled,
+                                ]}
+                              >
+                                <Text style={[styles.recipeAiChipText, active && styles.recipeAiChipTextActive]}>
+                                  {recipeMealTypeLabel(item)}
+                                </Text>
+                              </Pressable>
+                            );
+                          })}
+                        </View>
+                      </View>
+
+                      <View style={[styles.sectionCard, styles.recipeAiSectionCard]}>
+                        <View style={styles.recipeAiSectionHeader}>
+                          <Text style={styles.recipeAiSectionTitle}>Objetivo nutricional</Text>
+                          <Text style={styles.recipeAiSectionHelper}>
+                            Opcional, pero ayuda a que la propuesta no salga a ojo del vecino.
+                          </Text>
+                        </View>
+                        <View style={styles.recipeAiMacroGrid}>
+                          {([
+                            {
+                              key: "kcal",
+                              label: "Kcal objetivo",
+                              value: recipeAiTargetKcal,
+                              setter: setRecipeAiTargetKcal,
+                              tone: "kcal" as const,
+                              placeholder: "Ej: 650",
+                            },
+                            {
+                              key: "protein",
+                              label: "Proteína objetivo",
+                              value: recipeAiTargetProtein,
+                              setter: setRecipeAiTargetProtein,
+                              tone: "protein" as const,
+                              placeholder: "Ej: 40",
+                            },
+                            {
+                              key: "carbs",
+                              label: "Carbs objetivo",
+                              value: recipeAiTargetCarbs,
+                              setter: setRecipeAiTargetCarbs,
+                              tone: "carbs" as const,
+                              placeholder: "Ej: 55",
+                            },
+                            {
+                              key: "fat",
+                              label: "Grasas objetivo",
+                              value: recipeAiTargetFat,
+                              setter: setRecipeAiTargetFat,
+                              tone: "fat" as const,
+                              placeholder: "Ej: 18",
+                            },
+                          ]).map((field) => {
+                            const accent = macroAccentMeta(field.tone);
+                            return (
+                              <View
+                                key={field.key}
+                                style={[
+                                  styles.recipeAiMacroCard,
+                                  {
+                                    borderColor: accent.borderColor,
+                                    backgroundColor: field.value.trim() ? accent.softBackground : theme.panelSoft,
+                                  },
+                                ]}
+                              >
+                                <View style={[styles.recipeAiMacroCardBar, { backgroundColor: accent.color }]} />
+                                <InputField
+                                  label={field.label}
+                                  value={field.value}
+                                  onChangeText={field.setter}
+                                  keyboardType="numeric"
+                                  inputMode="numeric"
+                                  placeholder={field.placeholder}
+                                  editable={!saving}
+                                  accentColor={accent.color}
+                                  containerStyle={styles.recipeAiMacroFieldWrap}
+                                  inputStyle={styles.recipeAiMacroInput}
+                                />
+                              </View>
+                            );
+                          })}
+                        </View>
+
+                        <View style={styles.recipeAiInlineSection}>
+                          <Text style={styles.recipeAiInlineLabel}>Modo</Text>
+                          <View style={styles.recipeAiChipRow}>
+                            {([
+                              { label: "Perder grasa", value: "lose" },
+                              { label: "Mantener", value: "maintain" },
+                              { label: "Ganar", value: "gain" },
+                            ] as Array<{ label: string; value: GoalType }>).map((item) => {
+                              const active = recipeAiGoalMode === item.value;
+                              return (
+                                <Pressable
+                                  key={item.value}
+                                  disabled={saving}
+                                  onPress={() => setRecipeAiGoalMode(item.value)}
+                                  style={({ pressed }) => [
+                                    styles.recipeAiChip,
+                                    active && styles.recipeAiChipActive,
+                                    pressed && !saving && styles.recipeAiChipPressed,
+                                    saving && styles.recipeAiChipDisabled,
+                                  ]}
+                                >
+                                  <Text style={[styles.recipeAiChipText, active && styles.recipeAiChipTextActive]}>{item.label}</Text>
+                                </Pressable>
+                              );
+                            })}
+                          </View>
+                        </View>
+                      </View>
+
+                      <View style={[styles.sectionCard, styles.recipeAiSectionCard]}>
+                        <View style={styles.recipeAiSectionHeader}>
+                          <Text style={styles.recipeAiSectionTitle}>Restricciones</Text>
+                          <Text style={styles.recipeAiSectionHelper}>
+                            Define hasta dónde puede improvisar y qué debe evitar desde el principio.
+                          </Text>
+                        </View>
+                        <View style={styles.recipeAiChipRow}>
+                          <Pressable
+                            disabled={saving}
+                            onPress={() => setRecipeAiOnlyIngredients((current) => !current)}
+                            style={({ pressed }) => [
+                              styles.recipeAiChip,
+                              recipeAiOnlyIngredients && styles.recipeAiChipActive,
+                              pressed && !saving && styles.recipeAiChipPressed,
+                              saving && styles.recipeAiChipDisabled,
+                            ]}
+                          >
+                            <Text style={[styles.recipeAiChipText, recipeAiOnlyIngredients && styles.recipeAiChipTextActive]}>
+                              {recipeAiOnlyIngredients ? "Solo estos ingredientes" : "Puede sugerir extras"}
+                            </Text>
+                          </Pressable>
+                          <Pressable
+                            disabled={saving}
+                            onPress={() => setRecipeAiPantryBasics((current) => !current)}
+                            style={({ pressed }) => [
+                              styles.recipeAiChip,
+                              recipeAiPantryBasics && styles.recipeAiChipActive,
+                              pressed && !saving && styles.recipeAiChipPressed,
+                              saving && styles.recipeAiChipDisabled,
+                            ]}
+                          >
+                            <Text style={[styles.recipeAiChipText, recipeAiPantryBasics && styles.recipeAiChipTextActive]}>
+                              {recipeAiPantryBasics ? "Tengo básicos de cocina" : "Sin básicos extra"}
+                            </Text>
+                          </Pressable>
+                        </View>
+                        <View style={styles.recipeAiTextFieldGrid}>
+                          <InputField
+                            label="Alergias o prohibidos"
+                            value={recipeAiAllergiesInput}
+                            onChangeText={setRecipeAiAllergiesInput}
+                            placeholder="Ej: nueces, marisco"
+                            editable={!saving}
+                            helperText="Separa por comas lo que no puede aparecer."
+                            containerStyle={styles.recipeAiTextField}
+                          />
+                          <InputField
+                            label="Preferencias"
+                            value={recipeAiPreferencesInput}
+                            onChangeText={setRecipeAiPreferencesInput}
+                            placeholder="Ej: vegetariana, sin lactosa"
+                            editable={!saving}
+                            helperText="Sirve para modular estilo y restricciones blandas."
+                            containerStyle={styles.recipeAiTextField}
+                          />
+                        </View>
+                      </View>
+
+                      <View style={[styles.sectionCard, styles.recipeAiSectionCard]}>
+                        <View style={styles.recipeAiSectionHeader}>
+                          <Text style={styles.recipeAiSectionTitle}>Ingredientes disponibles</Text>
+                          <Text style={styles.recipeAiSectionHelper}>
+                            Añade nombre, cantidad y unidad si la sabes. La IA solo puede trabajar con lo que pongas aquí.
+                          </Text>
+                        </View>
+
+                        {!recipeAiHasAnyIngredientData ? (
+                          <View style={styles.recipeAiIngredientEmptyState}>
+                            <Text style={styles.recipeAiIngredientEmptyTitle}>Todavía no has puesto ingredientes</Text>
+                            <Text style={styles.recipeAiIngredientEmptyText}>
+                              Empieza con algo simple: pollo, arroz, huevo, tomate. Con eso ya sale una receta decente.
+                            </Text>
+                          </View>
+                        ) : null}
+
+                        <View style={styles.recipeAiIngredientList}>
+                          {recipeAiIngredientRows.map((row, index) => {
+                            const missingName = Boolean((row.quantity.trim() || row.unit.trim()) && !row.name.trim());
+                            return (
+                              <View key={row.key} style={styles.recipeAiIngredientCard}>
+                                <View style={styles.recipeAiIngredientCardHeader}>
+                                  <Text style={styles.recipeAiIngredientIndex}>Ingrediente {index + 1}</Text>
+                                  {recipeAiIngredientRows.length > 1 ? (
+                                    <Pressable
+                                      disabled={saving}
+                                      style={({ pressed }) => [
+                                        styles.recipeAiIngredientRemove,
+                                        pressed && styles.recipeAiIngredientRemovePressed,
+                                        saving && styles.recipeAiChipDisabled,
+                                      ]}
+                                      onPress={() =>
+                                        setRecipeAiIngredientRows((current) => current.filter((item) => item.key !== row.key))
+                                      }
+                                    >
+                                      <Text style={styles.recipeAiIngredientRemoveText}>×</Text>
+                                    </Pressable>
+                                  ) : null}
+                                </View>
+
+                                <View style={styles.recipeAiIngredientRow}>
+                                  <InputField
+                                    label="Nombre"
+                                    value={row.name}
+                                    onChangeText={(value) =>
+                                      setRecipeAiIngredientRows((current) =>
+                                        current.map((item) => (item.key === row.key ? { ...item, name: value } : item)),
+                                      )
+                                    }
+                                    placeholder="Ej: pollo"
+                                    editable={!saving}
+                                    autoFocus={recipeAiAutoFocusIngredientKey === row.key}
+                                    invalid={missingName}
+                                    helperText={missingName ? "Falta el nombre para que la IA sepa qué hacer con esto." : undefined}
+                                    containerStyle={styles.recipeAiIngredientNameField}
+                                  />
+                                  <View style={styles.recipeAiIngredientMetaFields}>
+                                    <InputField
+                                      label="Cantidad"
+                                      value={row.quantity}
+                                      onChangeText={(value) =>
+                                        setRecipeAiIngredientRows((current) =>
+                                          current.map((item) => (item.key === row.key ? { ...item, quantity: value } : item)),
+                                        )
+                                      }
+                                      keyboardType="numeric"
+                                      inputMode="numeric"
+                                      placeholder="Ej: 200"
+                                      editable={!saving}
+                                      containerStyle={styles.recipeAiIngredientCompactField}
+                                    />
+                                    <InputField
+                                      label="Unidad"
+                                      value={row.unit}
+                                      onChangeText={(value) =>
+                                        setRecipeAiIngredientRows((current) =>
+                                          current.map((item) => (item.key === row.key ? { ...item, unit: value } : item)),
+                                        )
+                                      }
+                                      placeholder="Ej: g"
+                                      editable={!saving}
+                                      containerStyle={styles.recipeAiIngredientCompactField}
+                                    />
+                                  </View>
+                                </View>
+                              </View>
+                            );
+                          })}
+                        </View>
+
+                        <View style={styles.recipeAiIngredientActions}>
+                          <SecondaryButton title="Añadir ingrediente" onPress={appendRecipeAiIngredientRow} disabled={saving} />
+                          <Text style={styles.recipeAiSectionFootnote}>Añade varios si quieres que la receta cierre mejor macros y textura.</Text>
+                        </View>
+                      </View>
+
+                      <View style={[styles.sectionCard, styles.recipeAiCtaCard]}>
+                        <View style={styles.recipeAiCtaCopy}>
+                          <Text style={styles.recipeAiSectionTitle}>Generar receta</Text>
+                          <Text style={styles.recipeAiSectionHelper}>
+                            La IA usará exactamente estos datos. Luego podrás revisar el resultado antes de guardarlo.
+                          </Text>
+                        </View>
+                        <PrimaryButton
+                          title="Generar receta"
+                          loadingTitle="Generando receta..."
+                          onPress={() => void runRecipeGenerator()}
+                          loading={saving}
+                          disabled={!recipeAiFilledIngredientCount}
+                          style={styles.recipeAiPrimaryButton}
+                          textStyle={styles.recipeAiPrimaryButtonText}
+                        />
+                      </View>
+                    </View>
+
+                    {recipeAiDesktopLayout ? (
+                      <View style={styles.recipeAiSidebar}>
+                        <View style={[styles.sectionCard, styles.recipeAiSummaryCard, recipeAiStickyCardStyle]}>
+                          <Text style={styles.recipeAiSummaryEyebrow}>Resumen</Text>
+                          <Text style={styles.recipeAiSummaryTitle}>Lo que va a usar la IA</Text>
+
+                          <View style={styles.recipeAiSummaryBlock}>
+                            <View style={styles.recipeAiSummaryRow}>
+                              <Text style={styles.recipeAiSummaryLabel}>Tipo</Text>
+                              <Text style={styles.recipeAiSummaryValue}>{recipeMealTypeLabel(recipeAiMealType)}</Text>
+                            </View>
+                            <View style={styles.recipeAiSummaryRow}>
+                              <Text style={styles.recipeAiSummaryLabel}>Modo</Text>
+                              <Text style={styles.recipeAiSummaryValue}>
+                                {recipeAiGoalMode === "lose" ? "Perder grasa" : recipeAiGoalMode === "gain" ? "Ganar" : "Mantener"}
+                              </Text>
+                            </View>
+                            <View style={styles.recipeAiSummaryRow}>
+                              <Text style={styles.recipeAiSummaryLabel}>Ingredientes</Text>
+                              <Text style={styles.recipeAiSummaryValue}>{recipeAiFilledIngredientCount}</Text>
+                            </View>
+                          </View>
+
+                          <View style={styles.recipeAiSummaryMacroGrid}>
+                            {([
+                              { label: "Kcal", value: recipeAiTargetKcal || "—", tone: "kcal" as const },
+                              { label: "Prote", value: recipeAiTargetProtein || "—", tone: "protein" as const },
+                              { label: "Carbs", value: recipeAiTargetCarbs || "—", tone: "carbs" as const },
+                              { label: "Grasa", value: recipeAiTargetFat || "—", tone: "fat" as const },
+                            ]).map((item) => {
+                              const accent = macroAccentMeta(item.tone);
+                              return (
+                                <View
+                                  key={item.label}
+                                  style={[styles.recipeAiSummaryMacroCard, { borderColor: accent.borderColor, backgroundColor: accent.softBackground }]}
+                                >
+                                  <Text style={[styles.recipeAiSummaryMacroLabel, { color: accent.color }]}>{item.label}</Text>
+                                  <Text style={styles.recipeAiSummaryMacroValue}>{item.value}</Text>
+                                </View>
+                              );
+                            })}
+                          </View>
+
+                          <View style={styles.recipeAiSummaryRestrictionBlock}>
+                            <Text style={styles.recipeAiSummarySubheading}>Restricciones activas</Text>
+                            <View style={styles.recipeAiSummaryRestrictionList}>
+                              {recipeAiRestrictionSummary.map((item) => (
+                                <View key={item} style={styles.recipeAiSummaryRestrictionPill}>
+                                  <Text style={styles.recipeAiSummaryRestrictionText}>{item}</Text>
+                                </View>
+                              ))}
+                            </View>
+                          </View>
+
+                          <PrimaryButton
+                            title="Generar receta"
+                            loadingTitle="Generando receta..."
+                            onPress={() => void runRecipeGenerator()}
+                            loading={saving}
+                            disabled={!recipeAiFilledIngredientCount}
+                            style={styles.recipeAiPrimaryButton}
+                            textStyle={styles.recipeAiPrimaryButtonText}
+                          />
+                        </View>
+                      </View>
+                    ) : null}
+                  </View>
+                ) : null}
+              </View>
+            ) : null}
+
+            {recipesStage === "ai_options" ? (
+              <View style={styles.sectionCard}>
+                <View style={styles.recipeAiOptionsHeader}>
+                  <View style={styles.recipeAiOptionsHeaderCopy}>
+                    <Text style={styles.sectionTitle}>Elige una dirección</Text>
+                    <Text style={styles.helperText}>
+                      Te propongo tres recetas distintas. La estrella marca la que mejor encaja con lo que llevas hoy.
+                    </Text>
+                  </View>
+                  {recipeAiGenerationId ? <TagChip label="3 opciones" tone="accent" /> : null}
+                </View>
+
+                {saving && recipeAiOptions.length === 0 ? (
+                  <View style={styles.recipeAiOptionsSkeletonList}>
+                    {[0, 1, 2].map((item) => (
+                      <View key={`recipe-ai-skeleton-${item}`} style={styles.recipeAiOptionCard}>
+                        <View style={styles.skeletonLineLg} />
+                        <View style={styles.skeletonRow}>
+                          <View style={styles.skeletonTile} />
+                          <View style={styles.skeletonTile} />
+                        </View>
+                        <View style={styles.skeletonLineMd} />
+                        <View style={styles.skeletonLineSm} />
+                        <View style={styles.skeletonLineSm} />
+                      </View>
+                    ))}
+                  </View>
+                ) : (
+                  <View style={styles.recipeAiOptionsList}>
+                    {recipeAiOptions.map((option) => {
+                      const complexityTone =
+                        option.complexity === "low" ? "low" : option.complexity === "high" ? "high" : "medium";
+                      return (
+                        <Pressable
+                          key={option.option_id}
+                          onPress={() => void openRecipeAiDetail(option)}
+                          disabled={saving}
+                          style={({ pressed }) => [
+                            styles.recipeAiOptionCard,
+                            option.recommended && styles.recipeAiOptionCardRecommended,
+                            pressed && !saving && styles.recipeAiOptionCardPressed,
+                          ]}
+                        >
+                            <View style={styles.recipeAiOptionHeader}>
+                              <View style={styles.recipeAiOptionHeaderCopy}>
+                              <View style={styles.recipeAiOptionTitleRow}>
+                                <Text style={styles.recipeAiOptionTitle}>{option.title}</Text>
+                                {option.recommended ? <Text style={styles.recipeAiRecommendedStar}>★</Text> : null}
+                              </View>
+                              <Text style={styles.recipeAiOptionMeta}>
+                                {recipeMealTypeLabel(option.meal_type)} · {option.servings} raciones
+                                {option.prep_time_min != null ? ` · ${option.prep_time_min} min` : ""}
+                              </Text>
+                              </View>
+                              <View
+                                style={[
+                                  styles.recipeAiComplexityChip,
+                                  complexityTone === "low"
+                                    ? styles.recipeAiComplexityChipLow
+                                    : complexityTone === "high"
+                                      ? styles.recipeAiComplexityChipHigh
+                                      : styles.recipeAiComplexityChipMedium,
+                                ]}
+                              >
+                                <Text style={styles.recipeAiComplexityChipText}>
+                                  {option.complexity === "low" ? "Bajo" : option.complexity === "high" ? "Alto" : "Medio"}
+                                </Text>
+                              </View>
+                            </View>
+
+                          {option.recommended && option.recommended_reason ? (
+                            <View style={styles.recipeAiRecommendedCallout}>
+                              <Text style={styles.recipeAiRecommendedCalloutText}>Recomendada: {option.recommended_reason}</Text>
+                            </View>
+                          ) : null}
+
+                          <Text style={styles.recipeAiOptionSummary}>{option.summary}</Text>
+
+                          <View style={styles.recipeAiOptionMacroRow}>
+                            {([
+                              { label: "kcal", value: Math.round(option.nutrition_kcal), tone: "kcal" as const },
+                              { label: "P", value: Math.round(option.nutrition_protein_g), tone: "protein" as const },
+                              { label: "C", value: Math.round(option.nutrition_carbs_g), tone: "carbs" as const },
+                              { label: "G", value: Math.round(option.nutrition_fat_g), tone: "fat" as const },
+                            ]).map((item) => {
+                              const accent = macroAccentMeta(item.tone);
+                              return (
+                                <View
+                                  key={`${option.option_id}-${item.label}`}
+                                  style={[
+                                    styles.recipeAiOptionMacroPill,
+                                    { borderColor: accent.borderColor, backgroundColor: accent.softBackground },
+                                  ]}
+                                >
+                                  <Text style={[styles.recipeAiOptionMacroLabel, { color: accent.color }]}>{item.label}</Text>
+                                  <Text style={styles.recipeAiOptionMacroValue}>{item.value}</Text>
+                                </View>
+                              );
+                            })}
+                          </View>
+
+                          {option.highlights.length ? (
+                            <View style={styles.recipeAiOptionHighlightList}>
+                              {option.highlights.map((item) => (
+                                <Text key={`${option.option_id}-${item}`} style={styles.recipeAiOptionHighlightText}>
+                                  · {item}
+                                </Text>
+                              ))}
+                            </View>
+                          ) : null}
+
+                          <PrimaryButton
+                            title="Elegir esta receta"
+                            onPress={() => void openRecipeAiDetail(option)}
+                            disabled={saving}
+                            style={styles.recipeAiOptionButton}
+                          />
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                )}
+              </View>
+            ) : null}
+
+            {recipesStage === "ai_result" ? (
+              <View style={styles.sectionCard}>
+                {saving && !recipeAiResult ? (
+                  <View style={styles.recipeAiDetailSkeleton}>
+                    <View style={styles.skeletonLineLg} />
+                    <View style={styles.skeletonLineMd} />
+                    <View style={styles.skeletonBlockTall} />
+                    <View style={styles.skeletonLineMd} />
+                    <View style={styles.skeletonLineSm} />
+                    <View style={styles.skeletonLineSm} />
+                  </View>
+                ) : recipeAiResult ? (
+                  <>
+                    <View style={styles.recipeAiDetailHeader}>
+                      <View style={styles.recipeAiDetailHeaderCopy}>
+                        <View style={styles.recipeAiOptionTitleRow}>
+                          <Text style={styles.sectionTitle}>{recipeAiResult.recipe.title}</Text>
+                          {recipeAiResult.recommended ? <Text style={styles.recipeAiRecommendedStar}>★</Text> : null}
+                        </View>
+                        <Text style={styles.helperText}>
+                          {recipeMealTypeLabel(recipeAiResult.recipe.meal_type)} · {recipeAiResult.recipe.servings} raciones
+                          {recipeAiResult.recipe.prep_time_min != null ? ` · ${recipeAiResult.recipe.prep_time_min} min` : ""}
+                        </Text>
+                        {recipeAiResult.recommended && recipeAiResult.recommended_reason ? (
+                          <Text style={styles.recipeAiDetailReason}>Recomendada: {recipeAiResult.recommended_reason}</Text>
+                        ) : null}
+                      </View>
+                      <TagChip label={`IA · ${recipeAiResult.model_used}`} tone="accent" />
+                    </View>
+
+                    <SectionHeader title="Resumen nutricional" />
+                    <AddQuantityMacroSummary
+                      kcal={recipeAiResult.recipe.nutrition_kcal}
+                      protein={recipeAiResult.recipe.nutrition_protein_g}
+                      carbs={recipeAiResult.recipe.nutrition_carbs_g}
+                      fats={recipeAiResult.recipe.nutrition_fat_g}
+                    />
+
+                    <SectionHeader title="Receta" />
+                    <View style={styles.recipeBulletList}>
+                      {recipeAiResult.recipe.ingredients.map((ingredient, index) => (
+                        <Text key={`${ingredient.name}-${index}`} style={styles.helperText}>
+                          · {ingredient.name}
+                          {ingredient.quantity != null ? ` · ${ingredient.quantity}` : ""}
+                          {ingredient.unit ? ` ${ingredient.unit}` : ""}
+                        </Text>
+                      ))}
+                    </View>
+                    <View style={styles.recipeBulletList}>
+                      {recipeAiResult.recipe.steps.map((step, index) => (
+                        <Text key={`ai-step-${index}`} style={styles.helperText}>
+                          {index + 1}. {step}
+                        </Text>
+                      ))}
+                    </View>
+
+                    <SectionHeader title="Feedback / Coach" />
+                    <View style={styles.recipeFeedbackCard}>
+                      <Text style={styles.helperText}>{recipeAiResult.feedback.summary}</Text>
+                      {recipeAiResult.feedback.highlights.map((item) => (
+                        <Text key={`highlight-${item}`} style={styles.helperText}>
+                          · {item}
+                        </Text>
+                      ))}
+                      {recipeAiResult.feedback.gaps.map((item) => (
+                        <Text key={`gap-${item}`} style={styles.helperText}>
+                          · {item}
+                        </Text>
+                      ))}
+                      {recipeAiResult.feedback.tips.map((item) => (
+                        <Text key={`tip-${item}`} style={styles.helperText}>
+                          · {item}
+                        </Text>
+                      ))}
+                      {recipeAiResult.assumptions.map((item) => (
+                        <Text key={`assumption-${item}`} style={styles.helperText}>
+                          · Supuesto: {item}
+                        </Text>
+                      ))}
+                    </View>
+
+                    <PrimaryButton title="Guardar receta" onPress={() => void saveRecipeFromAiResult()} loading={saving} />
+                    <SecondaryButton title="Editar" onPress={editRecipeFromAiResult} disabled={saving} />
+                    <SecondaryButton title="Ver otras opciones" onPress={() => setRecipesStage("ai_options")} disabled={saving} />
+                    <SecondaryButton title="Generar otra variante" onPress={() => void runRecipeGenerator()} disabled={saving} />
+                  </>
+                ) : null}
+              </View>
+            ) : null}
           </ScrollView>
         ) : null}
 
@@ -8203,9 +12456,11 @@ function AddScreen(props: {
               <View style={styles.quantitySummaryHeader}>
                 <Text style={styles.quantitySummaryTitle}>Resumen nutricional</Text>
                 <Text style={styles.quantitySummarySub}>
-                  {useDefaultSummary100g
-                    ? "100 g"
-                    : tx("{{quantityG}} g equivalentes", { quantityG: Math.round(resolvedQuantityG) })}
+                  {product.source === "user_recipe"
+                    ? `${Math.round(units * 10) / 10} ración${units === 1 ? "" : "es"}`
+                    : useDefaultSummary100g
+                      ? "100 g"
+                      : tx("{{quantityG}} g equivalentes", { quantityG: Math.round(resolvedQuantityG) })}
                 </Text>
               </View>
               {quantityMacroSummary ? (
@@ -8342,6 +12597,17 @@ function BottomTabIcon(props: { tab: Exclude<MainTab, "add">; active: boolean })
     );
   }
 
+  if (props.tab === "social") {
+    return (
+      <Svg width={22} height={22} viewBox="0 0 24 24" fill="none">
+        <Circle cx={8} cy={9} r={2.7} stroke={color} strokeWidth={strokeWidth} />
+        <Circle cx={16} cy={10.2} r={2.2} stroke={color} strokeWidth={strokeWidth} />
+        <Path d="M4.8 18.2c.7-2.3 2.5-3.6 5.2-3.6 2.7 0 4.5 1.3 5.2 3.6" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
+        <Path d="M13.6 17.8c.45-1.55 1.68-2.5 3.55-2.5 1.03 0 1.92.28 2.65.83" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
+      </Svg>
+    );
+  }
+
   return (
     <Svg width={22} height={22} viewBox="0 0 24 24" fill="none">
       <Circle cx={12} cy={12} r={3} stroke={color} strokeWidth={1.5} />
@@ -8350,6 +12616,20 @@ function BottomTabIcon(props: { tab: Exclude<MainTab, "add">; active: boolean })
         stroke={color}
         strokeWidth={1.5}
         strokeLinecap="round"
+      />
+    </Svg>
+  );
+}
+
+function VerifiedTickIcon() {
+  return (
+    <Svg width={16} height={16} viewBox="0 0 16 16" fill="none">
+      <Path
+        d="M3.35 8.2 6.25 11 12.65 5.05"
+        stroke={theme.ok}
+        strokeWidth={2.25}
+        strokeLinecap="round"
+        strokeLinejoin="round"
       />
     </Svg>
   );
@@ -8424,6 +12704,7 @@ function MainAppTabs() {
     dashboard: true,
     body: false,
     add: false,
+    social: false,
     history: false,
     settings: false,
   });
@@ -8438,13 +12719,18 @@ function MainAppTabs() {
   const [webHoveredTab, setWebHoveredTab] = useState<MainTab | null>(null);
   const [webAccountMenuOpen, setWebAccountMenuOpen] = useState(false);
   const [webAccountMenuVisible, setWebAccountMenuVisible] = useState(false);
+  const [avatarSourceSheetOpen, setAvatarSourceSheetOpen] = useState(false);
+  const [avatarSourceSheetVisible, setAvatarSourceSheetVisible] = useState(false);
+  const [uploadingWebAvatar, setUploadingWebAvatar] = useState(false);
   const quickAddAnim = useRef(new Animated.Value(0)).current;
   const tabBarAnim = useRef(new Animated.Value(1)).current;
   const webAccountMenuAnim = useRef(new Animated.Value(0)).current;
+  const avatarSourceSheetAnim = useRef(new Animated.Value(0)).current;
   const sceneOpacityRef = useRef<Record<MainTab, Animated.Value>>({
     dashboard: new Animated.Value(1),
     body: new Animated.Value(0),
     add: new Animated.Value(0),
+    social: new Animated.Value(0),
     history: new Animated.Value(0),
     settings: new Animated.Value(0),
   });
@@ -8477,12 +12763,14 @@ function MainAppTabs() {
     { value: "dashboard", label: "Panel" },
     { value: "body", label: "Cuerpo" },
     { value: "add", label: "", center: true },
+    { value: "social", label: "Social" },
     { value: "history", label: "Historial" },
     { value: "settings", label: "Ajustes" },
   ];
   const webTabs: Array<{ value: MainTab; label: string }> = [
     { value: "dashboard", label: "Panel" },
     { value: "body", label: "Body" },
+    { value: "social", label: "Social" },
     { value: "history", label: "Historial" },
     { value: "settings", label: "Ajustes" },
   ];
@@ -8664,6 +12952,98 @@ function MainAppTabs() {
     openWebAccountMenu();
   }, [closeWebAccountMenu, openWebAccountMenu, webAccountMenuOpen]);
 
+  const openAvatarSourceSheet = useCallback(() => {
+    if (avatarSourceSheetOpen) {
+      return;
+    }
+    setAvatarSourceSheetVisible(true);
+    setAvatarSourceSheetOpen(true);
+    avatarSourceSheetAnim.stopAnimation();
+    Animated.spring(avatarSourceSheetAnim, {
+      toValue: 1,
+      damping: 22,
+      stiffness: 240,
+      mass: 0.95,
+      useNativeDriver: true,
+    }).start();
+  }, [avatarSourceSheetAnim, avatarSourceSheetOpen]);
+
+  const closeAvatarSourceSheet = useCallback(
+    (onClosed?: () => void) => {
+      if (!avatarSourceSheetVisible) {
+        onClosed?.();
+        return;
+      }
+      setAvatarSourceSheetOpen(false);
+      avatarSourceSheetAnim.stopAnimation();
+      Animated.timing(avatarSourceSheetAnim, {
+        toValue: 0,
+        duration: 220,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }).start(({ finished }) => {
+        if (finished) {
+          setAvatarSourceSheetVisible(false);
+        }
+        onClosed?.();
+      });
+    },
+    [avatarSourceSheetAnim, avatarSourceSheetVisible],
+  );
+
+  const uploadWebAvatarFromAssets = useCallback(
+    async (assets: ImagePicker.ImagePickerAsset[]) => {
+      const firstAsset = assets[0];
+      if (!firstAsset?.uri) {
+        return;
+      }
+      setUploadingWebAvatar(true);
+      try {
+        const avatarUri = await prepareAvatarUploadUri(firstAsset);
+        await auth.uploadProfileAvatar(avatarUri);
+        showAlert("Perfil", "Foto de perfil actualizada.");
+      } catch (error) {
+        showAlert("Perfil", parseApiError(error));
+      } finally {
+        setUploadingWebAvatar(false);
+      }
+    },
+    [auth],
+  );
+
+  const pickWebAvatarFromLibrary = useCallback(async () => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      showAlert("Perfil", "Permite acceso a galería para elegir una foto.");
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.85,
+    });
+    if (!result.canceled && result.assets.length) {
+      await uploadWebAvatarFromAssets(result.assets);
+    }
+  }, [uploadWebAvatarFromAssets]);
+
+  const pickWebAvatarFromCamera = useCallback(async () => {
+    const permission = await ImagePicker.requestCameraPermissionsAsync();
+    if (!permission.granted) {
+      showAlert("Perfil", "Permite acceso a cámara para sacar la foto.");
+      return;
+    }
+    const result = await ImagePicker.launchCameraAsync({
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.85,
+    });
+    if (!result.canceled && result.assets[0]) {
+      await uploadWebAvatarFromAssets([result.assets[0]]);
+    }
+  }, [uploadWebAvatarFromAssets]);
+
   const webProfileName = auth.user?.username?.trim() || auth.user?.email?.split("@")[0] || "Usuario";
   const webProfileInitial = webProfileName.slice(0, 1).toUpperCase();
 
@@ -8696,6 +13076,18 @@ function MainAppTabs() {
     outputRange: [0.96, 1],
   });
   const webAccountMenuBackdropOpacity = webAccountMenuAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, 1],
+  });
+  const avatarSourceSheetTranslate = avatarSourceSheetAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [360, 0],
+  });
+  const avatarSourceSheetScale = avatarSourceSheetAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.96, 1],
+  });
+  const avatarSourceSheetBackdropOpacity = avatarSourceSheetAnim.interpolate({
     inputRange: [0, 1],
     outputRange: [0, 1],
   });
@@ -8736,6 +13128,13 @@ function MainAppTabs() {
     closeWebAccountMenu();
   }, [closeWebAccountMenu, isWeb, quickAddOpen, webAccountMenuOpen]);
 
+  useEffect(() => {
+    if (!isWeb || !avatarSourceSheetOpen || !webAccountMenuOpen) {
+      return;
+    }
+    closeWebAccountMenu();
+  }, [avatarSourceSheetOpen, closeWebAccountMenu, isWeb, webAccountMenuOpen]);
+
   return (
     <SafeAreaView style={styles.screen}>
       {isWeb ? (
@@ -8752,16 +13151,12 @@ function MainAppTabs() {
               style={({ pressed }) => [styles.webProfileButton, pressed && styles.webProfileButtonPressed]}
               onPress={toggleWebAccountMenu}
             >
-              <View style={styles.webProfileTextWrap}>
-                <Text style={styles.webProfileName} numberOfLines={1}>
-                  {webProfileName}
-                </Text>
-                <Text style={styles.webProfileEmail} numberOfLines={1}>
-                  {auth.user?.email ?? "-"}
-                </Text>
-              </View>
               <View style={styles.webProfileAvatar}>
-                <Text style={styles.webProfileAvatarText}>{webProfileInitial}</Text>
+                {auth.user?.avatar_url ? (
+                  <Image source={{ uri: auth.user.avatar_url }} style={styles.webProfileAvatarImage} />
+                ) : (
+                  <Text style={styles.webProfileAvatarText}>{webProfileInitial}</Text>
+                )}
               </View>
             </Pressable>
           </View>
@@ -8817,7 +13212,7 @@ function MainAppTabs() {
             },
           ]}
         >
-          {visitedTabs.dashboard ? <DashboardScreen onOpenBodyProgress={() => setTabWithFade("body")} /> : null}
+          {visitedTabs.dashboard ? <DashboardScreen isActive={tab === "dashboard"} onOpenBodyProgress={() => setTabWithFade("body")} /> : null}
         </Animated.View>
         <Animated.View
           pointerEvents={tab === "add" && !tabTransitioning ? "auto" : "none"}
@@ -8874,7 +13269,20 @@ function MainAppTabs() {
             },
           ]}
         >
-          {visitedTabs.history ? <HistoryScreen /> : null}
+          {visitedTabs.history ? <HistoryScreen isActive={tab === "history"} /> : null}
+        </Animated.View>
+        <Animated.View
+          pointerEvents={tab === "social" && !tabTransitioning ? "auto" : "none"}
+          style={[
+            styles.tabScene,
+            isWeb && styles.tabSceneWebOffset,
+            {
+              opacity: sceneOpacityRef.current.social,
+              zIndex: tab === "social" ? 3 : transitionFromTab === "social" ? 2 : 1,
+            },
+          ]}
+        >
+          {visitedTabs.social ? <SocialScreen /> : null}
         </Animated.View>
         <Animated.View
           pointerEvents={tab === "settings" && !tabTransitioning ? "auto" : "none"}
@@ -8963,6 +13371,23 @@ function MainAppTabs() {
           >
             <Pressable style={styles.accountMenuCard} onPress={() => {}}>
               <Text style={styles.accountMenuTitle}>Mi cuenta</Text>
+              <View style={styles.accountMenuAvatarBlock}>
+                <Pressable
+                  style={({ pressed }) => [styles.accountMenuAvatarPressable, pressed && styles.accountMenuAvatarPressablePressed]}
+                  onPress={() =>
+                    closeWebAccountMenu(() => {
+                      openAvatarSourceSheet();
+                    })
+                  }
+                >
+                  <AvatarCircle letter={webProfileInitial} imageUrl={auth.user?.avatar_url} size={72} />
+                </Pressable>
+                <View style={styles.accountMenuAvatarCopy}>
+                  <Text style={styles.accountMenuAvatarName}>@{auth.user?.username ?? "-"}</Text>
+                  <Text style={styles.accountMenuAvatarHint}>Pulsa la foto para cambiarla.</Text>
+                </View>
+              </View>
+              {uploadingWebAvatar ? <ActivityIndicator color={theme.accent} /> : null}
               <StatRow label="Usuario" value={auth.user?.username ?? "-"} />
               <StatRow label="Email" value={auth.user?.email ?? "-"} />
               <StatRow label="Email verificado" value={auth.user?.email_verified ? "Sí" : "No"} />
@@ -8975,6 +13400,64 @@ function MainAppTabs() {
                   })
                 }
               />
+            </Pressable>
+          </Animated.View>
+        </View>
+      ) : null}
+      {isWeb && avatarSourceSheetVisible ? (
+        <View style={[styles.mealSourceSheetLayer, styles.quickAddLayerWeb]} pointerEvents="box-none">
+          <Pressable style={styles.mealSourceSheetBackdrop} onPress={() => closeAvatarSourceSheet()}>
+            <Animated.View style={[styles.mealSourceSheetScrim, { opacity: avatarSourceSheetBackdropOpacity }]} />
+          </Pressable>
+          <Animated.View
+            style={[
+              styles.mealSourceSheetContainer,
+              {
+                opacity: avatarSourceSheetAnim,
+                transform: [{ translateY: avatarSourceSheetTranslate }, { scale: avatarSourceSheetScale }],
+              },
+            ]}
+          >
+            <Pressable style={styles.mealSourceSheetCard} onPress={() => {}}>
+              <Text style={styles.mealSourceSheetTitle}>Cambiar foto de perfil</Text>
+              <View style={styles.mealSourceSheetOptions}>
+                <Pressable
+                  style={styles.mealSourceSheetOption}
+                  onPress={() =>
+                    closeAvatarSourceSheet(() => {
+                      void pickWebAvatarFromCamera();
+                    })
+                  }
+                >
+                  <View style={styles.mealSourceSheetOptionIconWrap}>
+                    <Svg width={22} height={22} viewBox="0 0 24 24" fill="none">
+                      <Rect x={3} y={6} width={18} height={13} rx={3} stroke={theme.text} strokeWidth={2} />
+                      <Circle cx={12} cy={12.5} r={3.2} stroke={theme.text} strokeWidth={2} />
+                      <Rect x={7.2} y={4.2} width={3.8} height={2.5} rx={1} fill={theme.text} />
+                    </Svg>
+                  </View>
+                  <Text style={styles.mealSourceSheetOptionTitle}>Tomar foto</Text>
+                  <Text style={styles.mealSourceSheetOptionSubtitle}>Usar la cámara</Text>
+                </Pressable>
+                <Pressable
+                  style={styles.mealSourceSheetOption}
+                  onPress={() =>
+                    closeAvatarSourceSheet(() => {
+                      void pickWebAvatarFromLibrary();
+                    })
+                  }
+                >
+                  <View style={styles.mealSourceSheetOptionIconWrap}>
+                    <Svg width={22} height={22} viewBox="0 0 24 24" fill="none">
+                      <Rect x={4} y={5} width={16} height={14} rx={2.5} stroke={theme.text} strokeWidth={1.8} />
+                      <Circle cx={9} cy={10} r={1.7} fill={theme.text} />
+                      <Path d="M6.5 16l3.4-3.3 2.4 2.2 2.4-2.2 2.8 3.3" stroke={theme.text} strokeWidth={1.8} strokeLinecap="round" />
+                    </Svg>
+                  </View>
+                  <Text style={styles.mealSourceSheetOptionTitle}>Subir imagen</Text>
+                  <Text style={styles.mealSourceSheetOptionSubtitle}>Elegir de galería</Text>
+                </Pressable>
+              </View>
             </Pressable>
           </Animated.View>
         </View>
@@ -9021,8 +13504,8 @@ function MainAppTabs() {
                 />
                 <QuickAddCard
                   action="recipes"
-                  title="Mis recetas"
-                  subtitle="Reutiliza comidas y frecuentes"
+                  title="Crear recetas"
+                  subtitle="Recetas propias manuales o con IA"
                   accent="#ffcf6b"
                   onPress={() => runQuickAction("recipes")}
                 />
@@ -9237,6 +13720,16 @@ const styles = StyleSheet.create({
   fieldWrap: {
     gap: 8,
   },
+  fieldLabelRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  fieldLabelDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 999,
+  },
   fieldLabel: {
     color: theme.text,
     fontSize: 13,
@@ -9253,6 +13746,17 @@ const styles = StyleSheet.create({
   },
   inputFocused: {
     borderColor: theme.inputFocusBorder,
+  },
+  inputInvalid: {
+    borderColor: theme.danger,
+  },
+  fieldHelperText: {
+    color: theme.muted,
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  fieldHelperTextInvalid: {
+    color: theme.danger,
   },
   webDateFieldWrap: {
     borderWidth: 1,
@@ -9358,6 +13862,15 @@ const styles = StyleSheet.create({
     color: theme.primaryButtonText,
     fontSize: 15,
     fontWeight: "700",
+  },
+  buttonLoadingContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+  },
+  buttonLoadingText: {
+    color: theme.primaryButtonText,
   },
   mealQuestionProgressButtonContent: {
     flexDirection: "row",
@@ -9595,8 +14108,740 @@ const styles = StyleSheet.create({
     gap: 8,
     marginTop: 2,
   },
+  profileAvatarSection: {
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 12,
+    marginBottom: 6,
+  },
+  profileAvatarActions: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "center",
+    gap: 10,
+  },
   settingsCollapsedSummary: {
     gap: 6,
+  },
+  socialRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.border,
+  },
+  socialRowCopy: {
+    flex: 1,
+    gap: 4,
+  },
+  socialUserName: {
+    color: theme.text,
+    fontSize: Platform.OS === "web" ? 15 : 14,
+    fontWeight: "700",
+  },
+  socialActionButton: {
+    minWidth: 96,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: theme.accent,
+  },
+  socialActionButtonDisabled: {
+    opacity: 0.6,
+  },
+  socialActionButtonText: {
+    color: theme.primaryButtonText,
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  socialMainContent: {
+    paddingBottom: Platform.OS === "web" ? 140 : 110,
+    gap: 14,
+  },
+  socialSegmentsRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+    marginTop: Platform.OS === "web" ? 10 : 6,
+    marginBottom: 4,
+  },
+  socialFilterBlock: {
+    gap: 10,
+    marginBottom: 6,
+  },
+  socialFilterSection: {
+    gap: 8,
+  },
+  socialFilterLabel: {
+    color: theme.muted,
+    fontSize: 12,
+    fontWeight: "800",
+    letterSpacing: 0.4,
+    textTransform: "uppercase",
+  },
+  socialFilterDropdownRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+  },
+  socialFilterSelect: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: theme.panelSoft,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  socialFilterSelectPressed: {
+    opacity: 0.92,
+    transform: [{ scale: 0.99 }],
+  },
+  socialFilterSelectValueRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  socialFilterSelectLabel: {
+    color: theme.muted,
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  socialFilterSelectDivider: {
+    color: theme.muted,
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  socialFilterSelectValue: {
+    color: theme.text,
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  socialFilterSelectChevron: {
+    color: theme.muted,
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  socialFilterModalCard: {
+    maxWidth: Platform.OS === "web" ? 460 : 420,
+  },
+  socialFilterOptionList: {
+    gap: 10,
+  },
+  socialFilterOption: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: theme.panelSoft,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+  },
+  socialFilterOptionActive: {
+    borderColor: theme.accent,
+    backgroundColor: theme.accentSoft,
+  },
+  socialFilterOptionCopy: {
+    flex: 1,
+    gap: 4,
+  },
+  socialFilterOptionTitle: {
+    color: theme.text,
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  socialFilterOptionTitleActive: {
+    color: theme.text,
+  },
+  socialFilterOptionMeta: {
+    color: theme.muted,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  socialFilterOptionCheck: {
+    color: theme.accent,
+    fontSize: 18,
+    fontWeight: "900",
+  },
+  socialFilterRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  socialFilterChip: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: theme.panelSoft,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+  },
+  socialFilterChipActive: {
+    borderColor: theme.accent,
+    backgroundColor: theme.accentSoft,
+  },
+  socialFilterChipText: {
+    color: theme.muted,
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  socialFilterChipTextActive: {
+    color: theme.text,
+  },
+  socialSegmentChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: theme.panelSoft,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  socialSegmentChipActive: {
+    borderColor: theme.accent,
+    backgroundColor: theme.accentSoft,
+  },
+  socialSegmentChipText: {
+    color: theme.muted,
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  socialSegmentChipTextActive: {
+    color: theme.text,
+  },
+  socialSegmentBadge: {
+    minWidth: 20,
+    height: 20,
+    borderRadius: 999,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 6,
+    backgroundColor: theme.panel,
+    borderWidth: 1,
+    borderColor: theme.border,
+  },
+  socialSegmentBadgeActive: {
+    backgroundColor: "rgba(11,11,13,0.34)",
+    borderColor: "rgba(45,212,191,0.45)",
+  },
+  socialSegmentBadgeText: {
+    color: theme.text,
+    fontSize: 11,
+    fontWeight: "800",
+  },
+  socialStatusCard: {
+    gap: 10,
+  },
+  socialSkeletonList: {
+    gap: 12,
+  },
+  socialPostCard: {
+    gap: 12,
+  },
+  socialSkeletonHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  socialSkeletonAvatar: {
+    width: 42,
+    height: 42,
+    borderRadius: 999,
+    backgroundColor: theme.panelSoft,
+    borderWidth: 1,
+    borderColor: theme.border,
+  },
+  socialSkeletonHeaderCopy: {
+    flex: 1,
+    gap: 8,
+  },
+  socialSkeletonMedia: {
+    width: "100%",
+    height: Platform.OS === "web" ? 320 : 240,
+    borderRadius: 18,
+    backgroundColor: theme.panelSoft,
+    borderWidth: 1,
+    borderColor: theme.border,
+  },
+  socialSkeletonActions: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  socialSkeletonActionPill: {
+    width: 88,
+    height: 38,
+    borderRadius: 999,
+    backgroundColor: theme.panelSoft,
+    borderWidth: 1,
+    borderColor: theme.border,
+  },
+  socialPostHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    flexWrap: "wrap",
+  },
+  socialPostUserWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    flex: 1,
+    minWidth: 0,
+  },
+  socialPostUserCopy: {
+    flex: 1,
+    gap: 3,
+    minWidth: 0,
+  },
+  socialPostUserName: {
+    color: theme.text,
+    fontSize: Platform.OS === "web" ? 16 : 15,
+    fontWeight: "800",
+  },
+  socialPostMeta: {
+    color: theme.muted,
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  socialPostBadges: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "flex-end",
+    gap: 8,
+  },
+  socialTypeBadge: {
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 1,
+  },
+  socialTypeBadgeText: {
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  socialPostHeaderRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginLeft: "auto",
+  },
+  socialPostManageButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 999,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: theme.panelSoft,
+  },
+  socialPostManageButtonText: {
+    color: theme.text,
+    fontSize: 18,
+    lineHeight: 18,
+    fontWeight: "800",
+    marginTop: -4,
+  },
+  socialMediaCarousel: {
+    gap: 10,
+  },
+  socialMediaImage: {
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: theme.panelSoft,
+  },
+  socialCaptionWrap: {
+    gap: 6,
+  },
+  socialCaptionText: {
+    color: theme.text,
+    fontSize: 14,
+    lineHeight: 21,
+  },
+  socialCaptionToggle: {
+    alignSelf: "flex-start",
+  },
+  socialCaptionToggleText: {
+    color: theme.accent,
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  socialRecipeCard: {
+    gap: 12,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: theme.panelSoft,
+    padding: 14,
+  },
+  socialRecipeHeader: {
+    gap: 8,
+  },
+  socialRecipeTitle: {
+    color: theme.text,
+    fontSize: Platform.OS === "web" ? 18 : 16,
+    fontWeight: "800",
+    letterSpacing: -0.2,
+  },
+  socialMiniMetaRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  socialRecipeMacroSummary: {
+    marginTop: 2,
+  },
+  socialRecipeListBlock: {
+    gap: 6,
+  },
+  socialRecipeListTitle: {
+    color: theme.text,
+    fontSize: 13,
+    fontWeight: "800",
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+  },
+  socialRecipeListText: {
+    color: theme.text,
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  socialRecipeListMore: {
+    color: theme.muted,
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  socialNutritionRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  socialNutritionPill: {
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 1,
+  },
+  socialNutritionPillKcal: {
+    backgroundColor: "rgba(45,212,191,0.12)",
+    borderColor: "rgba(45,212,191,0.34)",
+  },
+  socialNutritionPillProtein: {
+    backgroundColor: "rgba(96,165,250,0.12)",
+    borderColor: "rgba(96,165,250,0.34)",
+  },
+  socialNutritionPillCarbs: {
+    backgroundColor: "rgba(245,158,11,0.12)",
+    borderColor: "rgba(245,158,11,0.34)",
+  },
+  socialNutritionPillFat: {
+    backgroundColor: "rgba(236,72,153,0.12)",
+    borderColor: "rgba(236,72,153,0.34)",
+  },
+  socialNutritionPillText: {
+    color: theme.text,
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  socialProgressGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+  },
+  socialProgressNotes: {
+    width: "100%",
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: theme.panelSoft,
+    padding: 12,
+  },
+  socialProgressNotesText: {
+    color: theme.text,
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  socialActionRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+  },
+  socialActionPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: theme.panelSoft,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  socialActionPillIcon: {
+    color: theme.muted,
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  socialActionPillIconActive: {
+    color: theme.fats,
+  },
+  socialActionPillText: {
+    color: theme.text,
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  socialDirectoryList: {
+    gap: 4,
+  },
+  socialDirectoryRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.border,
+  },
+  socialDirectoryUserPressable: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    flex: 1,
+    minWidth: 0,
+  },
+  socialDirectoryCopy: {
+    flex: 1,
+    gap: 3,
+    minWidth: 0,
+  },
+  socialDirectoryRight: {
+    alignItems: "flex-end",
+    justifyContent: "center",
+    minWidth: 96,
+  },
+  socialRequestCard: {
+    gap: 10,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.border,
+  },
+  socialRequestActions: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+  },
+  socialProfileHero: {
+    gap: 16,
+  },
+  socialProfileTopRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 14,
+  },
+  socialProfileIdentity: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    flex: 1,
+    minWidth: 0,
+  },
+  socialProfileIdentityCopy: {
+    flex: 1,
+    gap: 4,
+    minWidth: 0,
+  },
+  socialProfileHandle: {
+    color: theme.text,
+    fontSize: Platform.OS === "web" ? 22 : 19,
+    fontWeight: "900",
+    letterSpacing: -0.3,
+  },
+  socialProfileStatsRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+  },
+  socialModalLayer: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: "center",
+    paddingHorizontal: Platform.OS === "web" ? 28 : 14,
+    paddingVertical: 20,
+  },
+  socialModalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.56)",
+  },
+  socialModalKeyboardWrap: {
+    flex: 1,
+    justifyContent: "center",
+  },
+  socialComposerScrollContent: {
+    flexGrow: 1,
+    justifyContent: "center",
+  },
+  socialModalCard: {
+    width: "100%",
+    maxWidth: Platform.OS === "web" ? 760 : 680,
+    alignSelf: "center",
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: theme.panel,
+    padding: 18,
+    gap: 14,
+  },
+  socialCommentsModalCard: {
+    maxWidth: Platform.OS === "web" ? 700 : 640,
+  },
+  socialModalTitle: {
+    color: theme.text,
+    fontSize: Platform.OS === "web" ? 22 : 18,
+    fontWeight: "900",
+    letterSpacing: -0.4,
+  },
+  socialComposerTextarea: {
+    minHeight: 110,
+    paddingTop: 12,
+  },
+  socialPhotoControls: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+    marginBottom: 8,
+  },
+  socialComposerPhotoStrip: {
+    gap: 10,
+    paddingTop: 4,
+  },
+  socialComposerPhotoItem: {
+    position: "relative",
+  },
+  socialComposerPhotoThumb: {
+    width: 88,
+    height: 88,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: theme.panelSoft,
+  },
+  socialComposerPhotoRemove: {
+    position: "absolute",
+    top: -6,
+    right: -6,
+    width: 24,
+    height: 24,
+    borderRadius: 999,
+    backgroundColor: theme.panel,
+    borderWidth: 1,
+    borderColor: theme.border,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  socialComposerPhotoRemoveText: {
+    color: theme.text,
+    fontSize: 14,
+    fontWeight: "800",
+    lineHeight: 14,
+  },
+  socialRecipeComposerGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+  },
+  socialEditableList: {
+    gap: 10,
+  },
+  socialEditableRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  socialEditableInput: {
+    flex: 1,
+  },
+  socialInlineAddBtn: {
+    alignSelf: "flex-start",
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: theme.panelSoft,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  socialInlineAddText: {
+    color: theme.text,
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  socialInlineRemoveBtn: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: theme.panelSoft,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  socialInlineRemoveText: {
+    color: theme.muted,
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  socialComposerActions: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    gap: 10,
+  },
+  socialListFooter: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 18,
+  },
+  socialCommentsList: {
+    maxHeight: 340,
+  },
+  socialCommentsListContent: {
+    gap: 12,
+    paddingVertical: 6,
+  },
+  socialCommentRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+  },
+  socialCommentCopy: {
+    flex: 1,
+    gap: 4,
+    minWidth: 0,
+  },
+  socialCommentAuthor: {
+    color: theme.text,
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  socialCommentText: {
+    color: theme.text,
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  socialCommentComposer: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    gap: 10,
+  },
+  socialCommentInput: {
+    flex: 1,
   },
   statPillLabel: {
     color: theme.muted,
@@ -9647,12 +14892,12 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 24,
+    paddingHorizontal: 28,
     borderBottomWidth: 1,
     borderBottomColor: theme.topbarBorder,
   },
   webBrandButton: {
-    paddingVertical: 8,
+    paddingVertical: 10,
     paddingHorizontal: 2,
   },
   webBrandButtonPressed: {
@@ -9660,53 +14905,38 @@ const styles = StyleSheet.create({
   },
   webBrandText: {
     color: theme.text,
-    fontSize: 20,
+    fontSize: 24,
     fontWeight: "800",
-    letterSpacing: 0.4,
+    letterSpacing: 0.45,
   },
   webProfileButton: {
-    flexDirection: "row",
+    width: 50,
+    height: 50,
     alignItems: "center",
-    gap: 10,
-    borderWidth: 1,
-    borderColor: theme.border,
+    justifyContent: "center",
     borderRadius: 999,
-    backgroundColor: theme.panelSoft,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    maxWidth: 360,
+    padding: 0,
   },
   webProfileButtonPressed: {
     opacity: 0.9,
-    transform: [{ scale: 0.99 }],
-  },
-  webProfileTextWrap: {
-    gap: 1,
-    minWidth: 0,
-    maxWidth: 270,
-  },
-  webProfileName: {
-    color: theme.text,
-    fontSize: 13,
-    fontWeight: "700",
-  },
-  webProfileEmail: {
-    color: theme.muted,
-    fontSize: 11,
+    transform: [{ scale: 0.97 }],
   },
   webProfileAvatar: {
-    width: 30,
-    height: 30,
+    width: 46,
+    height: 46,
     borderRadius: 999,
-    borderWidth: 1,
-    borderColor: theme.border,
     backgroundColor: theme.panelMuted,
     alignItems: "center",
     justifyContent: "center",
+    overflow: "hidden",
+  },
+  webProfileAvatarImage: {
+    width: "100%",
+    height: "100%",
   },
   webProfileAvatarText: {
     color: theme.text,
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: "800",
   },
   webNavBar: {
@@ -9794,6 +15024,33 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "800",
     letterSpacing: 0.2,
+  },
+  accountMenuAvatarBlock: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingBottom: 4,
+  },
+  accountMenuAvatarPressable: {
+    borderRadius: 999,
+  },
+  accountMenuAvatarPressablePressed: {
+    opacity: 0.9,
+    transform: [{ scale: 0.98 }],
+  },
+  accountMenuAvatarCopy: {
+    flex: 1,
+    gap: 4,
+  },
+  accountMenuAvatarName: {
+    color: theme.text,
+    fontSize: 16,
+    fontWeight: "800",
+  },
+  accountMenuAvatarHint: {
+    color: theme.muted,
+    fontSize: 12,
+    lineHeight: 17,
   },
   bodyFormModalLayer: {
     ...StyleSheet.absoluteFillObject,
@@ -11587,6 +16844,594 @@ const styles = StyleSheet.create({
     color: theme.muted,
     fontSize: 11,
   },
+  recipeChoiceGrid: {
+    gap: 12,
+    flexDirection: Platform.OS === "web" ? "row" : "column",
+    flexWrap: "wrap",
+  },
+  recipeChoiceCard: {
+    flex: 1,
+    minWidth: Platform.OS === "web" ? 240 : undefined,
+    borderWidth: 1,
+    borderColor: theme.border,
+    borderRadius: 18,
+    backgroundColor: theme.panelSoft,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    gap: 8,
+  },
+  recipeChoiceTitle: {
+    color: theme.text,
+    fontSize: 16,
+    fontWeight: "800",
+  },
+  recipeChoiceText: {
+    color: theme.muted,
+    fontSize: 13,
+    lineHeight: 20,
+  },
+  recipeBulletList: {
+    gap: 6,
+  },
+  tagRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  recipeFeedbackCard: {
+    borderWidth: 1,
+    borderColor: theme.border,
+    borderRadius: 16,
+    backgroundColor: theme.panelSoft,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    gap: 6,
+  },
+  recipeAiScreen: {
+    gap: 14,
+  },
+  recipeAiHeroCard: {
+    gap: 10,
+    backgroundColor: "#101115",
+    borderColor: "#242730",
+  },
+  recipeAiEyebrow: {
+    color: theme.accent,
+    fontSize: 11,
+    fontWeight: "800",
+    letterSpacing: 1.2,
+    textTransform: "uppercase",
+  },
+  recipeAiHeroTitle: {
+    color: theme.text,
+    fontSize: Platform.OS === "web" ? 28 : 22,
+    fontWeight: "900",
+    letterSpacing: -0.5,
+    lineHeight: Platform.OS === "web" ? 32 : 27,
+  },
+  recipeAiHeroText: {
+    color: theme.muted,
+    fontSize: Platform.OS === "web" ? 14 : 13,
+    lineHeight: Platform.OS === "web" ? 21 : 20,
+    maxWidth: 780,
+  },
+  recipeAiLoadingCard: {
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+    minHeight: 120,
+  },
+  recipeAiUnavailableCard: {
+    gap: 10,
+  },
+  recipeAiLayout: {
+    gap: 14,
+  },
+  recipeAiLayoutDesktop: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 18,
+  },
+  recipeAiMainColumn: {
+    flex: 1,
+    gap: 14,
+  },
+  recipeAiSidebar: {
+    width: 340,
+    maxWidth: 340,
+  },
+  recipeAiSectionCard: {
+    gap: 16,
+  },
+  recipeAiSectionHeader: {
+    gap: 6,
+  },
+  recipeAiSectionTitle: {
+    color: theme.text,
+    fontSize: Platform.OS === "web" ? 18 : 16,
+    fontWeight: "800",
+    letterSpacing: -0.2,
+  },
+  recipeAiSectionHelper: {
+    color: theme.muted,
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  recipeAiChipRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+  },
+  recipeAiChip: {
+    borderWidth: 1,
+    borderColor: theme.border,
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    backgroundColor: theme.panelSoft,
+  },
+  recipeAiChipHover: {
+    borderColor: "#3a3d46",
+    backgroundColor: "#20222a",
+  },
+  recipeAiChipActive: {
+    borderColor: "rgba(45,212,191,0.42)",
+    backgroundColor: "rgba(45,212,191,0.12)",
+    shadowColor: "#2dd4bf",
+    shadowOpacity: 0.14,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 2,
+  },
+  recipeAiChipPressed: {
+    opacity: 0.92,
+    transform: [{ scale: 0.985 }],
+  },
+  recipeAiChipDisabled: {
+    opacity: 0.56,
+  },
+  recipeAiChipText: {
+    color: theme.muted,
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  recipeAiChipTextActive: {
+    color: theme.text,
+  },
+  recipeAiMacroGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 12,
+  },
+  recipeAiMacroCard: {
+    flexBasis: Platform.OS === "web" ? 240 : undefined,
+    flexGrow: 1,
+    minWidth: Platform.OS === "web" ? 220 : undefined,
+    borderWidth: 1,
+    borderRadius: 18,
+    overflow: "hidden",
+  },
+  recipeAiMacroCardBar: {
+    height: 3,
+    width: "100%",
+  },
+  recipeAiMacroFieldWrap: {
+    padding: 14,
+    gap: 8,
+  },
+  recipeAiMacroInput: {
+    backgroundColor: "rgba(10,10,12,0.18)",
+  },
+  recipeAiInlineSection: {
+    gap: 10,
+  },
+  recipeAiInlineLabel: {
+    color: theme.text,
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  recipeAiTextFieldGrid: {
+    flexDirection: Platform.OS === "web" ? "row" : "column",
+    gap: 12,
+  },
+  recipeAiTextField: {
+    flex: 1,
+  },
+  recipeAiIngredientEmptyState: {
+    borderWidth: 1,
+    borderColor: theme.border,
+    borderRadius: 18,
+    backgroundColor: theme.panelSoft,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    gap: 6,
+  },
+  recipeAiIngredientEmptyTitle: {
+    color: theme.text,
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  recipeAiIngredientEmptyText: {
+    color: theme.muted,
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  recipeAiIngredientList: {
+    gap: 12,
+  },
+  recipeAiIngredientCard: {
+    borderWidth: 1,
+    borderColor: theme.border,
+    borderRadius: 18,
+    backgroundColor: theme.panelSoft,
+    padding: 14,
+    gap: 12,
+  },
+  recipeAiIngredientCardHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  recipeAiIngredientIndex: {
+    color: theme.text,
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  recipeAiIngredientRemove: {
+    width: 32,
+    height: 32,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: theme.panel,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  recipeAiIngredientRemoveHover: {
+    backgroundColor: "#1c1f26",
+    borderColor: "#3a3d46",
+  },
+  recipeAiIngredientRemovePressed: {
+    opacity: 0.9,
+    transform: [{ scale: 0.96 }],
+  },
+  recipeAiIngredientRemoveText: {
+    color: theme.text,
+    fontSize: 18,
+    lineHeight: 18,
+    fontWeight: "800",
+    marginTop: -2,
+  },
+  recipeAiIngredientRow: {
+    flexDirection: Platform.OS === "web" ? "row" : "column",
+    alignItems: Platform.OS === "web" ? "flex-start" : "stretch",
+    gap: 12,
+  },
+  recipeAiIngredientNameField: {
+    flex: 1.45,
+  },
+  recipeAiIngredientMetaFields: {
+    flex: 1,
+    flexDirection: "row",
+    gap: 10,
+  },
+  recipeAiIngredientCompactField: {
+    flex: 1,
+  },
+  recipeAiIngredientActions: {
+    gap: 10,
+    alignItems: "flex-start",
+  },
+  recipeAiSectionFootnote: {
+    color: theme.muted,
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  recipeAiCtaCard: {
+    gap: 14,
+  },
+  recipeAiCtaCopy: {
+    gap: 6,
+  },
+  recipeAiPrimaryButton: {
+    minHeight: 56,
+    borderRadius: 18,
+  },
+  recipeAiPrimaryButtonText: {
+    fontSize: 16,
+    fontWeight: "800",
+  },
+  recipeAiSummaryCard: {
+    gap: 16,
+  },
+  recipeAiOptionsHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  recipeAiOptionsHeaderCopy: {
+    flex: 1,
+    gap: 6,
+  },
+  recipeAiOptionsSkeletonList: {
+    gap: 12,
+  },
+  recipeAiOptionsList: {
+    gap: 12,
+  },
+  recipeAiOptionCard: {
+    borderWidth: 1,
+    borderColor: theme.border,
+    borderRadius: 20,
+    backgroundColor: theme.panelSoft,
+    padding: 16,
+    gap: 12,
+  },
+  recipeAiOptionCardRecommended: {
+    borderColor: "rgba(45,212,191,0.38)",
+    backgroundColor: "#171b1f",
+    shadowColor: "#2dd4bf",
+    shadowOpacity: 0.1,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 2,
+  },
+  recipeAiOptionCardPressed: {
+    opacity: 0.96,
+    transform: [{ scale: 0.995 }],
+  },
+  recipeAiOptionHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  recipeAiOptionHeaderCopy: {
+    flex: 1,
+    gap: 4,
+  },
+  recipeAiOptionTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  recipeAiOptionTitle: {
+    color: theme.text,
+    fontSize: Platform.OS === "web" ? 19 : 17,
+    fontWeight: "800",
+    letterSpacing: -0.25,
+    flexShrink: 1,
+  },
+  recipeAiOptionMeta: {
+    color: theme.muted,
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  recipeAiRecommendedStar: {
+    color: "#facc15",
+    fontSize: 17,
+    fontWeight: "900",
+  },
+  recipeAiComplexityChip: {
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  recipeAiComplexityChipLow: {
+    borderColor: "rgba(52,211,153,0.34)",
+    backgroundColor: "rgba(52,211,153,0.12)",
+  },
+  recipeAiComplexityChipMedium: {
+    borderColor: "rgba(251,191,36,0.34)",
+    backgroundColor: "rgba(251,191,36,0.12)",
+  },
+  recipeAiComplexityChipHigh: {
+    borderColor: "rgba(248,113,113,0.34)",
+    backgroundColor: "rgba(248,113,113,0.12)",
+  },
+  recipeAiComplexityChipText: {
+    color: theme.text,
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  recipeAiRecommendedCallout: {
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "rgba(45,212,191,0.28)",
+    backgroundColor: "rgba(45,212,191,0.10)",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  recipeAiRecommendedCalloutText: {
+    color: theme.text,
+    fontSize: 12,
+    fontWeight: "700",
+    lineHeight: 18,
+  },
+  recipeAiOptionSummary: {
+    color: theme.text,
+    fontSize: 14,
+    lineHeight: 21,
+  },
+  recipeAiOptionMacroRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  recipeAiOptionMacroPill: {
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 11,
+    paddingVertical: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  recipeAiOptionMacroLabel: {
+    fontSize: 11,
+    fontWeight: "800",
+    textTransform: "uppercase",
+    letterSpacing: 0.3,
+  },
+  recipeAiOptionMacroValue: {
+    color: theme.text,
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  recipeAiOptionHighlightList: {
+    gap: 5,
+  },
+  recipeAiOptionHighlightText: {
+    color: theme.muted,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  recipeAiOptionButton: {
+    marginTop: 2,
+  },
+  recipeAiDetailSkeleton: {
+    gap: 12,
+  },
+  recipeAiDetailHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  recipeAiDetailHeaderCopy: {
+    flex: 1,
+    gap: 4,
+  },
+  recipeAiDetailReason: {
+    color: theme.accent,
+    fontSize: 12,
+    fontWeight: "700",
+    lineHeight: 18,
+  },
+  recipeAiSummaryEyebrow: {
+    color: theme.accent,
+    fontSize: 11,
+    fontWeight: "800",
+    letterSpacing: 1.2,
+    textTransform: "uppercase",
+  },
+  recipeAiSummaryTitle: {
+    color: theme.text,
+    fontSize: 20,
+    fontWeight: "900",
+    letterSpacing: -0.3,
+  },
+  recipeAiSummaryBlock: {
+    gap: 10,
+  },
+  recipeAiSummaryRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+  recipeAiSummaryLabel: {
+    color: theme.muted,
+    fontSize: 12,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+  },
+  recipeAiSummaryValue: {
+    color: theme.text,
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  recipeAiSummaryMacroGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+  },
+  recipeAiSummaryMacroCard: {
+    width: "47%",
+    minHeight: 82,
+    borderWidth: 1,
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    gap: 6,
+  },
+  recipeAiSummaryMacroLabel: {
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  recipeAiSummaryMacroValue: {
+    color: theme.text,
+    fontSize: 18,
+    fontWeight: "900",
+  },
+  recipeAiSummaryRestrictionBlock: {
+    gap: 10,
+  },
+  recipeAiSummarySubheading: {
+    color: theme.text,
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  recipeAiSummaryRestrictionList: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  recipeAiSummaryRestrictionPill: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: theme.panelSoft,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  recipeAiSummaryRestrictionText: {
+    color: theme.text,
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  recipeEditorGrid: {
+    flexDirection: Platform.OS === "web" ? "row" : "column",
+    flexWrap: "wrap",
+    gap: 12,
+  },
+  recipeEditorRow: {
+    flexDirection: Platform.OS === "web" ? "row" : "column",
+    alignItems: Platform.OS === "web" ? "flex-end" : "stretch",
+    gap: 10,
+  },
+  recipeStepRow: {
+    flexDirection: Platform.OS === "web" ? "row" : "column",
+    alignItems: Platform.OS === "web" ? "flex-end" : "stretch",
+    gap: 10,
+  },
+  recipeEditorPrimaryField: {
+    flex: 1.6,
+  },
+  recipeEditorCompactField: {
+    flex: 0.8,
+    minWidth: Platform.OS === "web" ? 110 : undefined,
+  },
+  recipeRowRemove: {
+    alignSelf: Platform.OS === "web" ? "center" : "flex-start",
+    borderWidth: 1,
+    borderColor: theme.border,
+    borderRadius: 999,
+    backgroundColor: theme.panelMuted,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginBottom: Platform.OS === "web" ? 10 : 0,
+  },
+  recipeRowRemoveText: {
+    color: theme.muted,
+    fontSize: 12,
+    fontWeight: "700",
+  },
   searchResultRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -11629,6 +17474,22 @@ const styles = StyleSheet.create({
     alignItems: "flex-end",
     gap: 6,
     maxWidth: 120,
+  },
+  searchVerifiedIconWrap: {
+    width: 28,
+    height: 28,
+    borderRadius: 999,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(52, 211, 153, 0.14)",
+    borderWidth: 1,
+    borderColor: "rgba(52, 211, 153, 0.34)",
+  },
+  searchVerifiedIcon: {
+    color: theme.ok,
+    fontSize: 15,
+    fontWeight: "900",
+    lineHeight: 15,
   },
   searchResultTitle: {
     color: theme.text,

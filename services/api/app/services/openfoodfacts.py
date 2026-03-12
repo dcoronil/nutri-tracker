@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import re
+import time
 import unicodedata
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
@@ -10,8 +14,6 @@ from app.config import get_settings
 from app.models import NutritionBasis
 
 CRITICAL_FIELDS = ["kcal", "protein_g", "fat_g", "carbs_g"]
-# Keep OFF fallback responsive; local DB is primary source.
-OFF_TIMEOUT = httpx.Timeout(8.0, connect=2.8)
 OFF_HEADERS = {
     "User-Agent": "nutri-tracker/0.1 (+https://github.com/nutri-tracker)",
 }
@@ -45,6 +47,20 @@ class OpenFoodFactsClientError(RuntimeError):
     pass
 
 
+@dataclass(slots=True)
+class _CacheEntry:
+    value: Any
+    expires_at: float
+
+
+_OFF_CLIENT: httpx.AsyncClient | None = None
+_OFF_CLIENT_LOCK: asyncio.Lock | None = None
+_OFF_SEARCH_CACHE: dict[tuple[str, int, str], _CacheEntry] = {}
+_OFF_PRODUCT_CACHE: dict[str, _CacheEntry] = {}
+_OFF_MIRROR_FAILURES: dict[str, float] = {}
+_NO_SUCCESS = object()
+
+
 def _normalize_search_text(value: str) -> str:
     lowered = value.strip().lower()
     folded = unicodedata.normalize("NFKD", lowered)
@@ -59,6 +75,34 @@ def _brand_tag(value: str) -> str | None:
         return None
     tag = normalized.replace(" ", "-")
     return tag or None
+
+
+def _is_brand_focused_query(query: str) -> bool:
+    tokens = [token for token in _normalize_search_text(query).split(" ") if token]
+    return len(tokens) == 1 and len(tokens[0]) >= 3
+
+
+def _brand_query_bonus(query: str, name: str, brand: str) -> float:
+    if not _is_brand_focused_query(query):
+        return 0.0
+
+    q = _normalize_search_text(query)
+    name_l = _normalize_search_text(name)
+    brand_l = _normalize_search_text(brand)
+    if not q or not brand_l:
+        return 0.0
+
+    bonus = 0.0
+    if brand_l == q:
+        bonus += 260.0
+    elif brand_l.startswith(q):
+        bonus += 120.0
+    elif q in brand_l:
+        bonus += 45.0
+
+    if brand_l == q and name_l.startswith(q):
+        bonus += 40.0
+    return bonus
 
 
 def _off_match_score(query: str, candidate: dict[str, Any]) -> float:
@@ -93,6 +137,8 @@ def _off_match_score(query: str, candidate: dict[str, Any]) -> float:
     elif q in brand:
         score += 240.0
 
+    score += _brand_query_bonus(query, name, brand)
+
     query_tokens = [token for token in q.split(" ") if token]
     if query_tokens:
         merged = f"{name} {brand}".strip()
@@ -109,12 +155,9 @@ def _off_match_score(query: str, candidate: dict[str, Any]) -> float:
     else:
         score -= 45.0
 
-    # Country relevance for Spanish users.
     has_spain = any(
         tag in {"en:spain", "es:espana", "es:españa", "spain", "espana", "españa"} for tag in countries_tags
-    ) or (
-        "spain" in countries_text or "españa" in countries_text or "espana" in countries_text
-    )
+    ) or ("spain" in countries_text or "españa" in countries_text or "espana" in countries_text)
     eu_nearby_tags = {
         "en:france",
         "en:portugal",
@@ -131,21 +174,19 @@ def _off_match_score(query: str, candidate: dict[str, Any]) -> float:
     has_nearby_eu = any(tag in eu_nearby_tags for tag in countries_tags)
     has_any_country = bool(countries_tags) or bool(countries_text)
     if has_spain:
-        score += 260.0
+        score += 320.0
     elif has_nearby_eu:
-        score += 120.0
+        score += 110.0
     elif has_any_country:
-        score -= 70.0
+        score -= 120.0
 
-    # Language relevance boost.
     if lang.startswith("es"):
-        score += 80.0
+        score += 110.0
     elif lang.startswith(("fr", "pt", "it")):
-        score += 24.0
+        score += 20.0
     elif lang:
-        score -= 20.0
+        score -= 30.0
 
-    # Penalize odd names and weak nutrition.
     alpha_ratio = (sum(1 for char in name if "a" <= char <= "z") / max(len(name), 1)) if name else 0.0
     if alpha_ratio < 0.55:
         score -= 55.0
@@ -224,6 +265,7 @@ def _extract_product_entry(product: dict[str, Any]) -> dict[str, Any] | None:
     return {
         "barcode": code,
         "name": name,
+        "generic_name": str(product.get("generic_name") or "").strip() or None,
         "brand": (product.get("brands") or "").split(",")[0].strip() or None,
         "brands_tags": product.get("brands_tags") if isinstance(product.get("brands_tags"), list) else [],
         "countries": product.get("countries"),
@@ -285,85 +327,374 @@ def missing_critical_fields(nutrition: dict[str, Any]) -> list[str]:
     return missing
 
 
-async def fetch_openfoodfacts_product(ean: str) -> dict[str, Any] | None:
+def _monotonic() -> float:
+    return time.monotonic()
+
+
+def _cache_lookup(cache: dict[Any, _CacheEntry], key: Any) -> tuple[bool, Any]:
+    entry = cache.get(key)
+    if entry is None:
+        return False, None
+    if entry.expires_at <= _monotonic():
+        cache.pop(key, None)
+        return False, None
+    return True, entry.value
+
+
+def _cache_store(cache: dict[Any, _CacheEntry], key: Any, value: Any, ttl_seconds: float) -> None:
+    cache[key] = _CacheEntry(value=value, expires_at=_monotonic() + max(ttl_seconds, 1.0))
+
+
+def _search_cache_key(query: str, bounded_limit: int, *, rescue_mode: bool = False) -> tuple[str, int, str]:
+    return (_normalize_search_text(query), bounded_limit, "rescue" if rescue_mode else "normal")
+
+
+def _clone_search_results(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [dict(item) for item in results]
+
+
+def _clone_product(product: dict[str, Any] | None) -> dict[str, Any] | None:
+    if product is None:
+        return None
+    return dict(product)
+
+
+def _failure_ttl_seconds() -> float:
     settings = get_settings()
-    errors: list[str] = []
+    return float(max(30, settings.openfoodfacts_failure_ttl_seconds))
 
-    for base_url in _candidate_base_urls(settings.openfoodfacts_base_url):
-        url = f"{base_url}/product/{ean}.json"
-        try:
-            async with httpx.AsyncClient(timeout=OFF_TIMEOUT, headers=OFF_HEADERS) as client:
-                response = await client.get(url)
-                response.raise_for_status()
-        except httpx.HTTPError as exc:
-            errors.append(f"{base_url}: {exc.__class__.__name__}")
+
+def _mark_mirror_success(base_url: str) -> None:
+    _OFF_MIRROR_FAILURES.pop(base_url.rstrip("/"), None)
+
+
+def _mark_mirror_failure(base_url: str) -> None:
+    _OFF_MIRROR_FAILURES[base_url.rstrip("/")] = _monotonic() + _failure_ttl_seconds()
+
+
+def _mirror_temporarily_disabled(base_url: str) -> bool:
+    normalized = base_url.rstrip("/")
+    expires_at = _OFF_MIRROR_FAILURES.get(normalized)
+    if expires_at is None:
+        return False
+    if expires_at <= _monotonic():
+        _OFF_MIRROR_FAILURES.pop(normalized, None)
+        return False
+    return True
+
+
+def _active_candidate_base_urls(
+    primary_base_url: str,
+    *,
+    max_count: int | None = None,
+    allow_disabled_fallback: bool = False,
+) -> list[str]:
+    candidates = _candidate_base_urls(primary_base_url)
+    active = [url for url in candidates if not _mirror_temporarily_disabled(url)]
+    if allow_disabled_fallback and not active:
+        active = list(candidates)
+    if max_count is None:
+        return active
+    return active[: max(1, max_count)]
+
+
+def _text_timeout(*, rescue_mode: bool = False) -> httpx.Timeout:
+    settings = get_settings()
+    if rescue_mode:
+        total = max(1.0, float(settings.openfoodfacts_rescue_text_timeout_seconds))
+        connect = min(total, max(0.2, float(settings.openfoodfacts_rescue_text_connect_timeout_seconds)))
+    else:
+        total = max(0.5, float(settings.openfoodfacts_text_timeout_seconds))
+        connect = min(total, max(0.1, float(settings.openfoodfacts_text_connect_timeout_seconds)))
+    return httpx.Timeout(total, connect=connect)
+
+
+def _barcode_timeout() -> httpx.Timeout:
+    settings = get_settings()
+    total = max(0.8, float(settings.openfoodfacts_barcode_timeout_seconds))
+    connect = min(total, max(0.1, float(settings.openfoodfacts_barcode_connect_timeout_seconds)))
+    return httpx.Timeout(total, connect=connect)
+
+
+async def _get_off_client() -> httpx.AsyncClient:
+    global _OFF_CLIENT, _OFF_CLIENT_LOCK
+
+    if _OFF_CLIENT is not None:
+        return _OFF_CLIENT
+
+    if _OFF_CLIENT_LOCK is None:
+        _OFF_CLIENT_LOCK = asyncio.Lock()
+
+    async with _OFF_CLIENT_LOCK:
+        if _OFF_CLIENT is None:
+            settings = get_settings()
+            limits = httpx.Limits(
+                max_connections=max(4, settings.openfoodfacts_http_max_connections),
+                max_keepalive_connections=max(2, settings.openfoodfacts_http_keepalive_connections),
+            )
+            _OFF_CLIENT = httpx.AsyncClient(headers=OFF_HEADERS, limits=limits)
+
+    return _OFF_CLIENT
+
+
+async def close_openfoodfacts_client() -> None:
+    global _OFF_CLIENT
+    if _OFF_CLIENT is None:
+        return
+    await _OFF_CLIENT.aclose()
+    _OFF_CLIENT = None
+
+
+def _scored_candidates(query: str, candidates: list[dict[str, Any]], bounded_limit: int) -> list[dict[str, Any]]:
+    deduped: list[dict[str, Any]] = []
+    seen_barcodes: set[str] = set()
+    for candidate in candidates:
+        barcode = str(candidate.get("barcode") or "").strip()
+        if not barcode or barcode in seen_barcodes:
             continue
+        seen_barcodes.add(barcode)
+        scored = dict(candidate)
+        scored["_off_score"] = _off_match_score(query, candidate)
+        deduped.append(scored)
 
-        payload = response.json()
-        return extract_product_from_openfoodfacts_payload(payload)
-
-    raise OpenFoodFactsClientError(f"OpenFoodFacts request failed on all mirrors: {' | '.join(errors)}")
+    deduped.sort(key=lambda item: float(item.get("_off_score") or 0.0), reverse=True)
+    return deduped[:bounded_limit]
 
 
-async def search_openfoodfacts_products(query: str, *, limit: int = 20) -> list[dict[str, Any]]:
+def _search_page_size(query: str, *, bounded_limit: int, rescue_mode: bool) -> int:
+    settings = get_settings()
+    normalized_query = _normalize_search_text(query)
+    token_count = len([token for token in normalized_query.split(" ") if token])
+    base_page_size = max(10, min(24, bounded_limit * 2))
+    if token_count == 1 and len(normalized_query) <= 4:
+        return max(base_page_size, min(60, settings.openfoodfacts_short_query_page_size))
+    if rescue_mode and token_count == 1 and len(normalized_query) <= 8:
+        return max(base_page_size, min(60, settings.openfoodfacts_short_query_page_size))
+    return base_page_size
+
+
+def _should_use_brand_fallback(query: str, *, rescue_mode: bool) -> bool:
+    normalized_query = _normalize_search_text(query)
+    if rescue_mode:
+        return False
+    if not _is_brand_focused_query(query):
+        return False
+    return len(normalized_query) >= 5
+
+
+def _rescue_query_variant(query: str) -> str | None:
+    normalized_query = _normalize_search_text(query)
+    tokens = [token for token in normalized_query.split(" ") if token]
+    if len(tokens) != 1:
+        return None
+
+    token = tokens[0]
+    candidates: list[str] = []
+    if token.endswith("es") and len(token) > 4:
+        candidates.append(token[:-2])
+    if token.endswith("s") and len(token) > 3:
+        candidates.append(token[:-1])
+
+    for candidate in candidates:
+        if candidate and candidate != token and len(candidate) >= 2:
+            return candidate
+    return None
+
+
+async def _search_single_mirror(
+    base_url: str,
+    query: str,
+    *,
+    bounded_limit: int,
+    rescue_mode: bool,
+) -> list[dict[str, Any]]:
+    client = await _get_off_client()
+    url = f"{base_url}/search"
+    page_size = _search_page_size(query, bounded_limit=bounded_limit, rescue_mode=rescue_mode)
+    timeout = _text_timeout(rescue_mode=rescue_mode)
+    base_params = {
+        "page_size": page_size,
+        "page": 1,
+        "fields": SEARCH_FIELDS,
+        "search_simple": 1,
+    }
+    try:
+        response = await client.get(
+            url,
+            params={
+                **base_params,
+                "search_terms": query,
+            },
+            timeout=timeout,
+        )
+        response.raise_for_status()
+    except httpx.HTTPError as exc:
+        _mark_mirror_failure(base_url)
+        raise OpenFoodFactsClientError(f"{base_url}: {exc.__class__.__name__}") from exc
+
+    _mark_mirror_success(base_url)
+    payload = response.json()
+    candidates = extract_products_from_openfoodfacts_search_payload(payload)
+    tag = _brand_tag(query)
+
+    if (
+        tag
+        and " " not in query.strip()
+        and _should_use_brand_fallback(query, rescue_mode=rescue_mode)
+        and len(candidates) < max(6, bounded_limit)
+    ):
+        try:
+            brand_response = await client.get(
+                url,
+                params={
+                    **base_params,
+                    "brands_tags": tag,
+                },
+                timeout=timeout,
+            )
+            brand_response.raise_for_status()
+            brand_payload = brand_response.json()
+            candidates.extend(extract_products_from_openfoodfacts_search_payload(brand_payload))
+        except httpx.HTTPError:
+            pass
+
+    return _scored_candidates(query, candidates, bounded_limit)
+
+
+async def _fetch_single_mirror(base_url: str, ean: str) -> dict[str, Any] | None:
+    client = await _get_off_client()
+    url = f"{base_url}/product/{ean}.json"
+    try:
+        response = await client.get(url, timeout=_barcode_timeout())
+        response.raise_for_status()
+    except httpx.HTTPError as exc:
+        _mark_mirror_failure(base_url)
+        raise OpenFoodFactsClientError(f"{base_url}: {exc.__class__.__name__}") from exc
+
+    _mark_mirror_success(base_url)
+    payload = response.json()
+    return extract_product_from_openfoodfacts_payload(payload)
+
+
+async def _race_mirrors(
+    base_urls: list[str],
+    runner: Any,
+) -> tuple[Any, list[str]]:
+    if not base_urls:
+        raise OpenFoodFactsClientError("OpenFoodFacts mirrors temporarily disabled")
+
+    async def _wrapped(base_url: str) -> tuple[str, Any, OpenFoodFactsClientError | None]:
+        try:
+            return base_url, await runner(base_url), None
+        except OpenFoodFactsClientError as exc:
+            return base_url, None, exc
+        except Exception as exc:  # pragma: no cover - defensive fallback
+            return base_url, None, OpenFoodFactsClientError(f"{base_url}: {exc.__class__.__name__}")
+
+    tasks = [asyncio.create_task(_wrapped(base_url)) for base_url in base_urls]
+    errors: list[str] = []
+    fallback_result: Any = _NO_SUCCESS
+
+    try:
+        for completed in asyncio.as_completed(tasks):
+            base_url, result, error = await completed
+            if error is not None:
+                errors.append(str(error))
+                continue
+            if result:
+                return result, errors
+            if fallback_result is _NO_SUCCESS:
+                fallback_result = result
+        return fallback_result, errors
+    finally:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        for task in tasks:
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+
+async def fetch_openfoodfacts_product(ean: str) -> dict[str, Any] | None:
+    barcode = ean.strip()
+    if not barcode:
+        return None
+
+    hit, cached = _cache_lookup(_OFF_PRODUCT_CACHE, barcode)
+    if hit:
+        return _clone_product(cached)
+
+    settings = get_settings()
+    base_urls = _active_candidate_base_urls(settings.openfoodfacts_base_url)
+    result, errors = await _race_mirrors(base_urls, lambda base_url: _fetch_single_mirror(base_url, barcode))
+
+    if result is _NO_SUCCESS and errors:
+        await close_openfoodfacts_client()
+        raise OpenFoodFactsClientError(f"OpenFoodFacts request failed on all mirrors: {' | '.join(errors)}")
+
+    if result is None:
+        _cache_store(_OFF_PRODUCT_CACHE, barcode, None, settings.openfoodfacts_cache_ttl_seconds)
+        return None
+
+    _cache_store(_OFF_PRODUCT_CACHE, barcode, result, settings.openfoodfacts_cache_ttl_seconds)
+    return _clone_product(result)
+
+
+async def _run_openfoodfacts_text_search(
+    query: str,
+    *,
+    bounded_limit: int,
+    rescue_mode: bool,
+) -> list[dict[str, Any]]:
+    settings = get_settings()
+    base_urls = _active_candidate_base_urls(
+        settings.openfoodfacts_base_url,
+        max_count=max(1, settings.openfoodfacts_max_search_mirrors),
+        allow_disabled_fallback=True,
+    )
+    result, errors = await _race_mirrors(
+        base_urls,
+        lambda base_url: _search_single_mirror(
+            base_url,
+            query,
+            bounded_limit=bounded_limit,
+            rescue_mode=rescue_mode,
+        ),
+    )
+
+    if result is _NO_SUCCESS and errors:
+        await close_openfoodfacts_client()
+        raise OpenFoodFactsClientError(f"OpenFoodFacts search request failed on all mirrors: {' | '.join(errors)}")
+
+    return result if isinstance(result, list) else []
+
+
+async def search_openfoodfacts_products(
+    query: str,
+    *,
+    limit: int = 20,
+    rescue_mode: bool = False,
+) -> list[dict[str, Any]]:
+    raw_query = query.strip()
+    normalized_query = _normalize_search_text(raw_query)
+    if not normalized_query:
+        return []
+
     settings = get_settings()
     bounded_limit = max(1, min(limit, 20))
-    errors: list[str] = []
-    candidate_urls = _candidate_base_urls(settings.openfoodfacts_base_url)[:2]
+    cache_key = _search_cache_key(normalized_query, bounded_limit, rescue_mode=rescue_mode)
+    hit, cached = _cache_lookup(_OFF_SEARCH_CACHE, cache_key)
+    if hit:
+        return _clone_search_results(cached)
 
-    for base_url in candidate_urls:
-        try:
-            async with httpx.AsyncClient(timeout=OFF_TIMEOUT, headers=OFF_HEADERS) as client:
-                url = f"{base_url}/search"
-                base_params = {
-                    "page_size": max(10, min(24, bounded_limit * 2)),
-                    "page": 1,
-                    "fields": SEARCH_FIELDS,
-                    "search_simple": 1,
-                }
-                candidates: list[dict[str, Any]] = []
-                tag = _brand_tag(query)
-
-                response = await client.get(
-                    url,
-                    params={
-                        **base_params,
-                        "search_terms": query,
-                    },
-                )
-                response.raise_for_status()
-                payload = response.json()
-                candidates.extend(extract_products_from_openfoodfacts_search_payload(payload))
-
-                # Optional brand query only when text search was sparse.
-                if tag and " " not in query.strip() and len(candidates) < max(6, bounded_limit):
-                    try:
-                        brand_response = await client.get(
-                            url,
-                            params={
-                                **base_params,
-                                "brands_tags": tag,
-                            },
-                        )
-                        brand_response.raise_for_status()
-                        brand_payload = brand_response.json()
-                        candidates.extend(extract_products_from_openfoodfacts_search_payload(brand_payload))
-                    except httpx.HTTPError:
-                        pass
-        except httpx.HTTPError as exc:
-            errors.append(f"{base_url}: {exc.__class__.__name__}")
-            continue
-
-        deduped: list[dict[str, Any]] = []
-        seen_barcodes: set[str] = set()
-        for candidate in candidates:
-            barcode = str(candidate.get("barcode") or "").strip()
-            if not barcode or barcode in seen_barcodes:
-                continue
-            seen_barcodes.add(barcode)
-            deduped.append(candidate)
-
-        deduped.sort(key=lambda item: _off_match_score(query, item), reverse=True)
-        return deduped[:bounded_limit]
-
-    raise OpenFoodFactsClientError(f"OpenFoodFacts search request failed on all mirrors: {' | '.join(errors)}")
+    resolved = await _run_openfoodfacts_text_search(raw_query, bounded_limit=bounded_limit, rescue_mode=rescue_mode)
+    if rescue_mode and not resolved:
+        variant = _rescue_query_variant(raw_query)
+        if variant and variant != normalized_query:
+            resolved = await _run_openfoodfacts_text_search(
+                variant,
+                bounded_limit=bounded_limit,
+                rescue_mode=True,
+            )
+    _cache_store(_OFF_SEARCH_CACHE, cache_key, resolved, settings.openfoodfacts_cache_ttl_seconds)
+    return _clone_search_results(resolved)
