@@ -12,6 +12,7 @@ node_modules/
 .expo/
 .expo-shared/
 dist/
+.data/
 
 # Env
 .env

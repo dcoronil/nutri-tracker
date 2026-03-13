@@ -1183,10 +1183,16 @@ def login(
     session: Annotated[Session, Depends(get_session)],
 ) -> AuthResponse:
     _rate_limit(request, scope="auth_login", limit=12, window_seconds=60)
-    email = payload.email.strip().lower()
-    user = session.exec(select(UserAccount).where(UserAccount.email == email)).first()
+    identifier = payload.email.strip().lower()
+    user = session.exec(
+        select(UserAccount).where(or_(UserAccount.email == identifier, UserAccount.username == identifier))
+    ).first()
     if not user:
-        pending = session.exec(select(PendingRegistration).where(PendingRegistration.email == email)).first()
+        pending = session.exec(
+            select(PendingRegistration).where(
+                or_(PendingRegistration.email == identifier, PendingRegistration.username == identifier)
+            )
+        ).first()
         if pending:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -1636,7 +1642,7 @@ def _social_media_relative_path(post_id: str, filename: str) -> str:
     return f"{post_id}/{filename}"
 
 
-def _social_media_public_url(request: Request, media_path: str) -> str:
+def _normalize_social_media_path(media_path: str) -> str | None:
     normalized = media_path.strip()
     if normalized.startswith(("http://", "https://")):
         parsed = urlsplit(normalized)
@@ -1644,11 +1650,29 @@ def _social_media_public_url(request: Request, media_path: str) -> str:
         if normalized.startswith("media/"):
             normalized = normalized[6:]
         else:
-            return media_path
+            return None
     else:
         normalized = normalized.lstrip("/")
         if normalized.startswith("media/"):
             normalized = normalized[6:]
+    return normalized or None
+
+
+def _social_media_file_exists(media_path: str) -> bool:
+    normalized = _normalize_social_media_path(media_path)
+    if not normalized:
+        return False
+    target = (_social_media_storage_root() / normalized).resolve()
+    root = _social_media_storage_root().resolve()
+    if root not in target.parents and target != root:
+        return False
+    return target.is_file()
+
+
+def _social_media_public_url(request: Request, media_path: str) -> str:
+    normalized = _normalize_social_media_path(media_path)
+    if not normalized:
+        return media_path
     return f"{str(request.base_url).rstrip('/')}/media/{normalized}"
 
 
@@ -2023,6 +2047,7 @@ def _serialize_social_posts(
                         "order_index": media.order_index,
                     }
                     for media in media_by_post.get(post.id, [])
+                    if _social_media_file_exists(media.media_url)
                 ],
                 recipe=(
                     SocialRecipePayload(

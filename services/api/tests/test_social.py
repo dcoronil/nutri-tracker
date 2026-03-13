@@ -125,6 +125,22 @@ def test_social_post_media_uses_relative_storage_and_current_public_base_url(cli
     assert item["media"][0]["media_url"] == f"http://testserver/media/{recipe_post['id']}/social_1.jpg"
 
 
+def test_social_post_media_missing_file_is_hidden_from_feed(client, auth_headers, engine):
+    recipe_post = _create_recipe_post(client, auth_headers, caption="missing-media-check")
+
+    with Session(engine) as session:
+        media_row = session.exec(select(SocialPostMedia).where(SocialPostMedia.post_id == recipe_post["id"])).first()
+        assert media_row is not None
+        media_row.media_url = f"{recipe_post['id']}/missing.jpg"
+        session.add(media_row)
+        session.commit()
+
+    feed_response = client.get("/social/feed?limit=10", headers=auth_headers)
+    assert feed_response.status_code == 200
+    item = next(post for post in feed_response.json()["items"] if post["id"] == recipe_post["id"])
+    assert item["media"] == []
+
+
 def test_friend_request_send_accept_and_friends_list(client, auth_headers):
     second_user = _create_verified_user(client, "buddy")
 

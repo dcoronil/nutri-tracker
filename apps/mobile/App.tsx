@@ -55,6 +55,9 @@ type AddLaunchAction = {
 type AddBackTarget = "hub" | "barcode_camera" | "manual" | "recipes";
 type AuthStackScreen = "welcome" | "signup" | "login";
 type OnboardingStep = 1 | 2 | 3;
+type WebSignupStep = 1 | 2 | 3 | 4 | 5 | 6 | 7;
+type WizardPrimaryGoal = "lose_weight" | "maintain_weight" | "gain_weight" | "gain_muscle" | "improve_nutrition" | "increase_steps";
+type MeasurementSystem = "metric" | "imperial";
 
 type AuthUser = {
   id: number;
@@ -645,6 +648,30 @@ type GoogleAuthInput = {
   birth_date?: string;
 };
 
+type WebSignupDraft = {
+  step: WebSignupStep;
+  displayName: string;
+  primaryGoal: WizardPrimaryGoal;
+  activityLevel: ActivityLevel;
+  sex: Sex;
+  birthDate: string;
+  country: string;
+  measurementSystem: MeasurementSystem;
+  currentWeightKg: string;
+  currentWeightLb: string;
+  targetWeightKg: string;
+  targetWeightLb: string;
+  heightCm: string;
+  heightFt: string;
+  heightIn: string;
+  weeklyGoalKg: string;
+  email: string;
+  password: string;
+  confirmPassword: string;
+  acceptedTerms: boolean;
+  pendingFinalize: boolean;
+};
+
 type AuthContextValue = {
   loading: boolean;
   token: string | null;
@@ -653,6 +680,7 @@ type AuthContextValue = {
   apiBaseUrl: string;
   pendingVerificationEmail: string | null;
   otpHint: string | null;
+  webSignupDraft: WebSignupDraft | null;
   register: (input: RegisterInput) => Promise<RegisterResponse>;
   checkUsernameAvailability: (username: string) => Promise<UsernameAvailability>;
   login: (input: LoginInput) => Promise<void>;
@@ -832,6 +860,7 @@ type AuthContextValue = {
   unlikeSocialPost: (postId: string) => Promise<SocialLikeToggleResponse>;
   fetchSocialComments: (postId: string) => Promise<SocialComment[]>;
   createSocialComment: (postId: string, text: string) => Promise<SocialComment>;
+  setWebSignupDraft: (draft: WebSignupDraft | null) => Promise<void>;
   setApiBaseUrl: (url: string) => void;
   checkHealth: (url?: string) => Promise<boolean>;
 };
@@ -843,6 +872,7 @@ type Segment = {
 };
 
 const TOKEN_STORAGE_KEY = "nutri_tracker_access_token";
+const WEB_SIGNUP_DRAFT_STORAGE_KEY = "nutri_tracker_web_signup_draft";
 const MAX_MEAL_PHOTOS = 3;
 const DEV_SETTINGS_MODE = (process.env.EXPO_PUBLIC_DEV_SETTINGS ?? "false").toLowerCase() === "true";
 const STREAK_FLAME_SVG_XML =
@@ -896,6 +926,158 @@ function normalizeBaseUrl(raw: string): string {
   }
 
   return `http://${trimmed.replace(/\/+$/, "")}`;
+}
+
+function defaultWebSignupDraft(): WebSignupDraft {
+  return {
+    step: 1,
+    displayName: "",
+    primaryGoal: "maintain_weight",
+    activityLevel: "moderate",
+    sex: "other",
+    birthDate: "2000-01-01",
+    country: "España",
+    measurementSystem: "metric",
+    currentWeightKg: "",
+    currentWeightLb: "",
+    targetWeightKg: "",
+    targetWeightLb: "",
+    heightCm: "",
+    heightFt: "",
+    heightIn: "",
+    weeklyGoalKg: "",
+    email: "",
+    password: "",
+    confirmPassword: "",
+    acceptedTerms: false,
+    pendingFinalize: false,
+  };
+}
+
+function sanitizeUsernameCandidate(raw: string): string {
+  return raw
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9._\s-]/g, "")
+    .replace(/\s+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/\.+/g, ".")
+    .replace(/^[_\.]+|[_\.]+$/g, "")
+    .slice(0, 32);
+}
+
+function goalTypeFromPrimaryGoal(goal: WizardPrimaryGoal): GoalType {
+  if (goal === "lose_weight") {
+    return "lose";
+  }
+  if (goal === "gain_weight" || goal === "gain_muscle") {
+    return "gain";
+  }
+  return "maintain";
+}
+
+function kgToLb(value: number): number {
+  return value * 2.2046226218;
+}
+
+function lbToKg(value: number): number {
+  return value / 2.2046226218;
+}
+
+function cmToFeetInches(value: number): { feet: number; inches: number } {
+  const totalInches = value / 2.54;
+  const feet = Math.floor(totalInches / 12);
+  const inches = Math.round((totalInches - feet * 12) * 10) / 10;
+  return { feet, inches };
+}
+
+function feetInchesToCm(feet: number, inches: number): number {
+  return (feet * 12 + inches) * 2.54;
+}
+
+function parseWizardHeightCm(draft: WebSignupDraft): number | null {
+  if (draft.measurementSystem === "metric") {
+    return toPositiveNumberOrNull(draft.heightCm);
+  }
+  const feet = toOptionalNumber(draft.heightFt);
+  const inches = toOptionalNumber(draft.heightIn);
+  if (feet == null || feet < 0 || inches == null || inches < 0) {
+    return null;
+  }
+  const cm = feetInchesToCm(feet, inches);
+  return Number.isFinite(cm) && cm > 0 ? Math.round(cm * 10) / 10 : null;
+}
+
+function parseWizardCurrentWeightKg(draft: WebSignupDraft): number | null {
+  if (draft.measurementSystem === "metric") {
+    return toPositiveNumberOrNull(draft.currentWeightKg);
+  }
+  const pounds = toPositiveNumberOrNull(draft.currentWeightLb);
+  return pounds ? Math.round(lbToKg(pounds) * 10) / 10 : null;
+}
+
+function parseWizardTargetWeightKg(draft: WebSignupDraft): number | null {
+  if (draft.measurementSystem === "metric") {
+    return toPositiveNumberOrNull(draft.targetWeightKg);
+  }
+  const pounds = toPositiveNumberOrNull(draft.targetWeightLb);
+  return pounds ? Math.round(lbToKg(pounds) * 10) / 10 : null;
+}
+
+function syncDraftMeasurementSystem(draft: WebSignupDraft, system: MeasurementSystem): WebSignupDraft {
+  if (draft.measurementSystem === system) {
+    return draft;
+  }
+  const next = { ...draft, measurementSystem: system };
+  const currentWeightKg = parseWizardCurrentWeightKg(draft);
+  const targetWeightKg = parseWizardTargetWeightKg(draft);
+  const heightCm = parseWizardHeightCm(draft);
+  if (system === "imperial") {
+    if (currentWeightKg) {
+      next.currentWeightLb = String(Math.round(kgToLb(currentWeightKg) * 10) / 10);
+    }
+    if (targetWeightKg) {
+      next.targetWeightLb = String(Math.round(kgToLb(targetWeightKg) * 10) / 10);
+    }
+    if (heightCm) {
+      const converted = cmToFeetInches(heightCm);
+      next.heightFt = String(converted.feet);
+      next.heightIn = String(converted.inches);
+    }
+  } else {
+    if (currentWeightKg) {
+      next.currentWeightKg = String(Math.round(currentWeightKg * 10) / 10);
+    }
+    if (targetWeightKg) {
+      next.targetWeightKg = String(Math.round(targetWeightKg * 10) / 10);
+    }
+    if (heightCm) {
+      next.heightCm = String(Math.round(heightCm));
+    }
+  }
+  return next;
+}
+
+function buildWeeklyGoalOptions(primaryGoal: WizardPrimaryGoal): Array<{ label: string; value: string; description: string; recommended?: boolean }> {
+  if (primaryGoal === "lose_weight") {
+    return [
+      { label: "0,25 kg/semana", value: "0.25", description: "Déficit suave y más fácil de sostener.", recommended: true },
+      { label: "0,5 kg/semana", value: "0.5", description: "Ritmo equilibrado para perder grasa.", recommended: false },
+      { label: "0,75 kg/semana", value: "0.75", description: "Más agresivo; exige adherencia.", recommended: false },
+    ];
+  }
+  if (primaryGoal === "gain_weight" || primaryGoal === "gain_muscle") {
+    return [
+      { label: "0,25 kg/semana", value: "0.25", description: "Subida controlada y más limpia.", recommended: true },
+      { label: "0,5 kg/semana", value: "0.5", description: "Ritmo rápido si te cuesta ganar peso.", recommended: false },
+    ];
+  }
+  return [
+    { label: "Sin cambio semanal", value: "", description: "Mantén el foco en hábitos y objetivos diarios.", recommended: true },
+    { label: "Ajuste mínimo", value: "0.25", description: "Útil si quieres un pequeño empujón sin priorizar el peso.", recommended: false },
+  ];
 }
 
 function getExpoHostIp(): string | null {
@@ -1632,6 +1814,7 @@ function AuthProvider({ children }: { children: import("react").ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [pendingVerificationEmail, setPendingVerificationEmail] = useState<string | null>(null);
   const [otpHint, setOtpHint] = useState<string | null>(null);
+  const [webSignupDraft, setWebSignupDraftState] = useState<WebSignupDraft | null>(null);
   const [apiBaseUrl, setApiBaseUrl] = useState(inferApiBaseUrl());
 
   const parseApiBody = useCallback((text: string): unknown => {
@@ -1772,6 +1955,17 @@ function AuthProvider({ children }: { children: import("react").ReactNode }) {
   const boot = useCallback(async () => {
     setLoading(true);
     try {
+      const storedDraft = await getStoredItem(WEB_SIGNUP_DRAFT_STORAGE_KEY);
+      if (storedDraft) {
+        try {
+          setWebSignupDraftState(JSON.parse(storedDraft) as WebSignupDraft);
+        } catch {
+          await deleteStoredItem(WEB_SIGNUP_DRAFT_STORAGE_KEY);
+          setWebSignupDraftState(null);
+        }
+      } else {
+        setWebSignupDraftState(null);
+      }
       const storedToken = await getStoredItem(TOKEN_STORAGE_KEY);
       if (!storedToken) {
         setToken(null);
@@ -1804,6 +1998,15 @@ function AuthProvider({ children }: { children: import("react").ReactNode }) {
     setProfile(response.profile);
     setPendingVerificationEmail(null);
     await setStoredItem(TOKEN_STORAGE_KEY, response.access_token);
+  }, []);
+
+  const setWebSignupDraft = useCallback(async (draft: WebSignupDraft | null) => {
+    setWebSignupDraftState(draft);
+    if (draft) {
+      await setStoredItem(WEB_SIGNUP_DRAFT_STORAGE_KEY, JSON.stringify(draft));
+      return;
+    }
+    await deleteStoredItem(WEB_SIGNUP_DRAFT_STORAGE_KEY);
   }, []);
 
   const register = useCallback(
@@ -2807,6 +3010,7 @@ function AuthProvider({ children }: { children: import("react").ReactNode }) {
       apiBaseUrl,
       pendingVerificationEmail,
       otpHint,
+      webSignupDraft,
       register,
       checkUsernameAvailability,
       login,
@@ -2872,6 +3076,7 @@ function AuthProvider({ children }: { children: import("react").ReactNode }) {
       unlikeSocialPost,
       fetchSocialComments,
       createSocialComment,
+      setWebSignupDraft,
       setApiBaseUrl: (url: string) => setApiBaseUrl(normalizeBaseUrl(url)),
       checkHealth,
     }),
@@ -2921,6 +3126,7 @@ function AuthProvider({ children }: { children: import("react").ReactNode }) {
       logout,
       lookupByBarcode,
       otpHint,
+      webSignupDraft,
       pendingVerificationEmail,
       profile,
       refreshMe,
@@ -2946,6 +3152,7 @@ function AuthProvider({ children }: { children: import("react").ReactNode }) {
       unlikeSocialPost,
       fetchSocialComments,
       createSocialComment,
+      setWebSignupDraft,
       token,
       user,
       verifyEmail,
@@ -3257,7 +3464,7 @@ function PrimaryButton(props: {
   );
 }
 
-function SecondaryButton(props: { title: string; onPress: () => void; disabled?: boolean }) {
+function SecondaryButton(props: { title: string; onPress: () => void; disabled?: boolean; style?: ViewStyle; textStyle?: TextStyle }) {
   const [hovered, setHovered] = useState(false);
   return (
     <Pressable
@@ -3267,12 +3474,13 @@ function SecondaryButton(props: { title: string; onPress: () => void; disabled?:
       onHoverOut={() => setHovered(false)}
       style={({ pressed }) => [
         styles.secondaryButton,
+        props.style,
         hovered && !props.disabled && styles.secondaryButtonHover,
         pressed && !props.disabled && styles.secondaryButtonPressed,
         props.disabled && styles.disabledButton,
       ]}
     >
-      <Text style={styles.secondaryButtonText}>{props.title}</Text>
+      <Text style={[styles.secondaryButtonText, props.textStyle]}>{props.title}</Text>
     </Pressable>
   );
 }
@@ -3282,11 +3490,14 @@ function GoogleAuthButton(props: {
   disabled?: boolean;
   helperText?: string;
   onCredential: (credential: string) => void;
+  variant?: "card" | "inline";
+  showConfigHint?: boolean;
+  missingConfigText?: string;
 }) {
   const hostRef = useRef<View | null>(null);
   const [ready, setReady] = useState<boolean>(() => Platform.OS === "web" && typeof window !== "undefined" && Boolean(window.google?.accounts?.id));
   const [loadingScript, setLoadingScript] = useState(false);
-  const { disabled, helperText, mode, onCredential } = props;
+  const { disabled, helperText, mode, onCredential, variant = "card", showConfigHint = false, missingConfigText } = props;
 
   useEffect(() => {
     if (Platform.OS !== "web" || typeof window === "undefined" || typeof document === "undefined" || !GOOGLE_WEB_CLIENT_ID || window.google?.accounts?.id) {
@@ -3361,8 +3572,32 @@ function GoogleAuthButton(props: {
     });
   }, [mode, onCredential, ready]);
 
-  if (Platform.OS !== "web" || !GOOGLE_WEB_CLIENT_ID) {
+  if (Platform.OS !== "web") {
     return null;
+  }
+
+  if (!GOOGLE_WEB_CLIENT_ID) {
+    if (!showConfigHint) {
+      return null;
+    }
+    return (
+      <View style={variant === "inline" ? styles.googleAuthInlineMissing : styles.googleAuthCard}>
+        <Text style={variant === "inline" ? styles.googleAuthInlineMissingTitle : styles.googleAuthTitle}>Google</Text>
+        <Text style={variant === "inline" ? styles.googleAuthInlineMissingText : styles.googleAuthSubtitle}>
+          {missingConfigText ?? "Falta configurar EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID para activar este acceso."}
+        </Text>
+      </View>
+    );
+  }
+
+  if (variant === "inline") {
+    return (
+      <View style={[styles.googleAuthInlineWrap, disabled && styles.googleAuthCardDisabled]}>
+        {helperText ? <Text style={styles.googleAuthInlineHelper}>{helperText}</Text> : null}
+        <View pointerEvents={disabled ? "none" : "auto"} ref={hostRef as never} style={styles.googleAuthButtonHostInline} />
+        {loadingScript && !ready ? <Text style={styles.fieldHelperText}>Cargando acceso con Google...</Text> : null}
+      </View>
+    );
   }
 
   return (
@@ -3615,20 +3850,1414 @@ function AddActionCard(props: {
 }
 
 function WelcomeScreen({ onCreate, onLogin }: { onCreate: () => void; onLogin: () => void }) {
+  const { width } = useWindowDimensions();
+  const { t } = useI18n();
+  const isWeb = Platform.OS === "web";
+  const desktop = isDesktopWebLayout(width);
+  const scrollRef = useRef<ScrollView | null>(null);
+  const heroIntro = useRef(new Animated.Value(0)).current;
+  const heroFloat = useRef(new Animated.Value(0)).current;
+
+  const features = [
+    {
+      title: t("Escaneo inteligente de productos y etiquetas"),
+      description: t("Detecta productos, revisa etiquetas y completa datos nutricionales con menos fricción."),
+      accent: theme.kcal,
+    },
+    {
+      title: t("IA para fotos de comidas"),
+      description: t("La IA añade preguntas cortas cuando la foto sola no basta para afinar porciones y macros."),
+      accent: theme.blue,
+    },
+    {
+      title: t("Macros y seguimiento corporal"),
+      description: t("Une calorías, macros, peso y medidas en el mismo flujo para ver progreso real."),
+      accent: theme.carbs,
+    },
+    {
+      title: t("Recetas adaptadas a tu objetivo"),
+      description: t("Genera opciones según tus ingredientes, tu objetivo y lo que te queda hoy."),
+      accent: theme.fats,
+    },
+  ];
+
+  const steps = [
+    {
+      title: t("Escanea o registra"),
+      description: t("Busca productos, usa código de barras o registra manualmente sin perder tiempo."),
+    },
+    {
+      title: t("Obtén datos más precisos con IA"),
+      description: t("Analiza fotos de comidas y etiquetas para refinar macros, porciones y calidad del dato."),
+    },
+    {
+      title: t("Sigue tu progreso y ajusta objetivos"),
+      description: t("Consulta panel, cuerpo e historial para corregir el rumbo antes de desviarte."),
+    },
+  ];
+
+  const heroSignals = [
+    {
+      label: t("Escaneo inteligente"),
+      value: t("Producto, etiqueta o foto"),
+      accent: theme.kcal,
+    },
+    {
+      label: t("Foto + contexto"),
+      value: t("La IA pregunta cuando la imagen no basta"),
+      accent: theme.blue,
+    },
+    {
+      label: t("Ingredientes -> receta"),
+      value: t("Opciones según lo que te falta hoy"),
+      accent: theme.fats,
+    },
+  ];
+
+  useEffect(() => {
+    if (!isWeb) {
+      return;
+    }
+    heroIntro.setValue(0);
+    heroFloat.setValue(0);
+    const intro = Animated.timing(heroIntro, {
+      toValue: 1,
+      duration: 260,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    });
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(heroFloat, {
+          toValue: 1,
+          duration: 2400,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+        Animated.timing(heroFloat, {
+          toValue: 0,
+          duration: 2400,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    intro.start(() => {
+      loop.start();
+    });
+    return () => {
+      intro.stop();
+      loop.stop();
+    };
+  }, [heroFloat, heroIntro, isWeb]);
+
+  const heroCopyOpacity = heroIntro;
+  const heroCopyTranslateY = heroIntro.interpolate({
+    inputRange: [0, 1],
+    outputRange: [18, 0],
+  });
+  const heroMockupOpacity = heroIntro.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, 1],
+  });
+  const heroMockupTranslateX = heroIntro.interpolate({
+    inputRange: [0, 1],
+    outputRange: [22, 0],
+  });
+  const heroMockupTranslateY = heroFloat.interpolate({
+    inputRange: [0, 0.5, 1],
+    outputRange: [0, -8, 0],
+  });
+  const heroGlowOpacity = heroFloat.interpolate({
+    inputRange: [0, 0.5, 1],
+    outputRange: [0.18, 0.3, 0.2],
+  });
+  const heroSecondaryTranslateY = heroFloat.interpolate({
+    inputRange: [0, 0.5, 1],
+    outputRange: [0, -10, 0],
+  });
+  const heroTertiaryTranslateY = heroFloat.interpolate({
+    inputRange: [0, 0.5, 1],
+    outputRange: [0, 8, 0],
+  });
+  const heroPrimaryScale = heroFloat.interpolate({
+    inputRange: [0, 0.5, 1],
+    outputRange: [1, 1.008, 1],
+  });
+  const heroAmbientLeftTranslate = heroFloat.interpolate({
+    inputRange: [0, 0.5, 1],
+    outputRange: [0, -10, 0],
+  });
+  const heroAmbientRightTranslate = heroFloat.interpolate({
+    inputRange: [0, 0.5, 1],
+    outputRange: [0, 10, 0],
+  });
+
+  if (!isWeb) {
+    return (
+      <SafeAreaView style={styles.screen}>
+        <ScrollView contentContainerStyle={styles.authScroll} keyboardShouldPersistTaps="handled">
+          <View style={styles.brandCard}>
+            <Text style={styles.brandEyebrow}>NUTRI TRACKER</Text>
+            <Text style={styles.brandTitle}>{t("Nutrición clara, seguimiento real y IA útil.")}</Text>
+            <Text style={styles.brandText}>
+              {t("Escanea productos, registra comidas y usa IA para entender mejor lo que comes y cómo progresas.")}
+            </Text>
+          </View>
+          <PrimaryButton title={t("Crear cuenta")} onPress={onCreate} />
+          <SecondaryButton title={t("Iniciar sesión")} onPress={onLogin} />
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
+
   return (
-    <SafeAreaView style={styles.screen}>
-      <ScrollView contentContainerStyle={styles.authScroll} keyboardShouldPersistTaps="handled">
-        <View style={styles.brandCard}>
-          <Text style={styles.brandEyebrow}>NUTRI TRACKER</Text>
-          <Text style={styles.brandTitle}>Control nutricional diario, claro y sin ruido</Text>
-          <Text style={styles.brandText}>
-            Escanea, registra porciones y visualiza tu progreso con objetivos realistas según tu perfil.
-          </Text>
+    <SafeAreaView style={styles.webLandingScreen}>
+      <AuthWebTopbar
+        onHome={() => {
+          scrollRef.current?.scrollTo({ y: 0, animated: true });
+        }}
+        menuActions={[
+          { label: "Registrarte", onPress: onCreate, primary: true },
+          { label: "Iniciar sesión", onPress: onLogin },
+        ]}
+      />
+      <ScrollView
+        ref={scrollRef}
+        contentContainerStyle={styles.webLandingScroll}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={[styles.webLandingHeroSection, desktop && styles.webLandingHeroSectionDesktop]}>
+          <Animated.View
+            pointerEvents="none"
+            style={[styles.webLandingHeroAmbientLeft, { transform: [{ translateY: heroAmbientLeftTranslate }] }]}
+          />
+          <Animated.View
+            pointerEvents="none"
+            style={[styles.webLandingHeroAmbientRight, { transform: [{ translateY: heroAmbientRightTranslate }] }]}
+          />
+          <Animated.View
+            style={[
+              styles.webLandingHeroCopy,
+              {
+                opacity: heroCopyOpacity,
+                transform: [{ translateY: heroCopyTranslateY }],
+              },
+            ]}
+          >
+            <Text style={styles.webLandingEyebrow}>{t("Nutrición y progreso sin ruido")}</Text>
+            <Text style={styles.webLandingHeroTitle}>{t("Nutrición clara, seguimiento real y IA útil.")}</Text>
+            <Text style={styles.webLandingHeroSubtitle}>
+              {t("Escanea productos, afina fotos con preguntas de apoyo cuando hace falta contexto y genera opciones según lo que tienes y lo que te falta hoy.")}
+            </Text>
+            <View style={styles.webLandingHeroActions}>
+              <PrimaryButton title={t("Empezar")} onPress={onCreate} style={styles.webLandingPrimaryCta} />
+              <SecondaryButton title={t("Iniciar sesión")} onPress={onLogin} style={styles.webLandingSecondaryCta} />
+            </View>
+            <View style={[styles.webLandingHeroSignalRow, desktop && styles.webLandingHeroSignalRowDesktop]}>
+              {heroSignals.map((signal) => (
+                <View key={signal.label} style={styles.webLandingHeroSignalCard}>
+                  <View style={[styles.webLandingHeroSignalLine, { backgroundColor: signal.accent }]} />
+                  <Text style={styles.webLandingHeroSignalLabel}>{signal.label}</Text>
+                  <Text style={styles.webLandingHeroSignalValue}>{signal.value}</Text>
+                </View>
+              ))}
+            </View>
+          </Animated.View>
+
+          <Animated.View
+            style={[
+              styles.webLandingHeroPreview,
+              {
+                opacity: heroMockupOpacity,
+                transform: [{ translateX: heroMockupTranslateX }, { translateY: heroMockupTranslateY }],
+              },
+            ]}
+          >
+            <View style={styles.webLandingMockupStage}>
+              <Animated.View style={[styles.webLandingMockupGlow, { opacity: heroGlowOpacity }]} />
+              <Animated.View style={[styles.webLandingMockupPrimary, { transform: [{ scale: heroPrimaryScale }] }]}>
+                <View style={styles.webLandingMockupHeader}>
+                  <View style={styles.webLandingMockupHeaderCopy}>
+                    <Text style={styles.webLandingMockupEyebrow}>NUTRI TRACKER</Text>
+                    <Text style={styles.webLandingMockupTitle}>{t("Vista diaria")}</Text>
+                  </View>
+                  <View style={styles.webLandingMockupStatusPill}>
+                    <Text style={styles.webLandingMockupStatusText}>{t("En línea con tu objetivo")}</Text>
+                  </View>
+                </View>
+                <View style={styles.webLandingMockupHeroMetric}>
+                  <Text style={styles.webLandingMockupHeroMetricValue}>1784</Text>
+                  <Text style={styles.webLandingMockupHeroMetricLabel}>{t("kcal consumidas hoy")}</Text>
+                </View>
+                <View style={styles.webLandingMockupMacroGrid}>
+                  {[
+                    { label: "P", value: "132g", color: theme.blue },
+                    { label: "C", value: "188g", color: theme.carbs },
+                    { label: "G", value: "54g", color: theme.fats },
+                  ].map((item) => (
+                    <View key={item.label} style={styles.webLandingMockupMacroCard}>
+                      <View style={[styles.webLandingMockupMacroDot, { backgroundColor: item.color }]} />
+                      <Text style={styles.webLandingMockupMacroLabel}>{item.label}</Text>
+                      <Text style={styles.webLandingMockupMacroValue}>{item.value}</Text>
+                    </View>
+                  ))}
+                </View>
+                <View style={styles.webLandingMockupList}>
+                  {[t("Escaneo inteligente de productos y etiquetas"), t("IA para fotos de comidas")].map((item, index) => (
+                    <View key={item} style={styles.webLandingMockupListRow}>
+                      <View
+                        style={[
+                          styles.webLandingMockupListAccent,
+                          { backgroundColor: [theme.kcal, theme.blue, theme.carbs][index] },
+                        ]}
+                      />
+                      <Text style={styles.webLandingMockupListText}>{item}</Text>
+                    </View>
+                  ))}
+                </View>
+              </Animated.View>
+              <Animated.View style={[styles.webLandingMockupSecondary, { transform: [{ translateY: heroSecondaryTranslateY }] }]}>
+                <Text style={styles.webLandingMockupMiniEyebrow}>{t("Foto + contexto")}</Text>
+                <Text style={styles.webLandingMockupMiniTitle}>{t("La IA pregunta cuando la imagen no basta")}</Text>
+                <Text style={styles.webLandingMockupMiniText}>
+                  {t("Añade apoyo contextual para afinar porciones y macros antes de guardar.")}
+                </Text>
+              </Animated.View>
+              <Animated.View style={[styles.webLandingMockupTertiary, { transform: [{ translateY: heroTertiaryTranslateY }] }]}>
+                <Text style={styles.webLandingMockupMiniEyebrow}>{t("Ingredientes -> receta")}</Text>
+                <Text style={styles.webLandingMockupMiniTitle}>{t("Opciones según lo que te falta hoy")}</Text>
+                <View style={styles.webLandingMockupRecommendation}>
+                  <Text style={styles.webLandingMockupRecommendationStar}>★</Text>
+                  <Text style={styles.webLandingMockupRecommendationText}>{t("Más proteína con lo que ya tienes")}</Text>
+                </View>
+              </Animated.View>
+            </View>
+          </Animated.View>
         </View>
 
-        <PrimaryButton title="Crear cuenta" onPress={onCreate} />
-        <SecondaryButton title="Iniciar sesión" onPress={onLogin} />
+        <View style={styles.webLandingSection}>
+          <View style={styles.webLandingSectionHeader}>
+            <Text style={styles.webLandingSectionTitle}>{t("Todo lo importante en un mismo flujo")}</Text>
+            <Text style={styles.webLandingSectionSubtitle}>
+              {t("Desde el escaneo hasta el seguimiento corporal, con una capa de IA pensada para mejorar precisión y contexto.")}
+            </Text>
+          </View>
+          <View style={[styles.webLandingValueLayout, desktop && styles.webLandingValueLayoutDesktop]}>
+            <View style={styles.webLandingValueLead}>
+              <View style={styles.webLandingValueLeadAccent} />
+              <Text style={styles.webLandingValueLeadTitle}>{t("IA que añade contexto útil")}</Text>
+              <Text style={styles.webLandingValueLeadText}>
+                {t("No se queda en detectar una foto o un producto: añade contexto cuando hace falta y te ayuda a convertir ingredientes en opciones más útiles para tu día.")}
+              </Text>
+              <View style={styles.webLandingValueBullets}>
+                {[
+                  {
+                    title: t("Preguntas cuando hacen falta"),
+                    description: t("La IA añade contexto a la foto para afinar porciones y macros."),
+                    accent: theme.blue,
+                  },
+                  {
+                    title: t("Recetas con lo que tienes"),
+                    description: t("Genera opciones según ingredientes disponibles y necesidades del día."),
+                    accent: theme.fats,
+                  },
+                  {
+                    title: t("Menos fricción al registrar"),
+                    description: t("Escaneo inteligente de productos y etiquetas"),
+                    accent: theme.kcal,
+                  },
+                ].map((item) => (
+                  <View key={item.title} style={styles.webLandingValueBullet}>
+                    <View style={[styles.webLandingValueBulletDot, { backgroundColor: item.accent }]} />
+                    <View style={styles.webLandingValueBulletCopy}>
+                      <Text style={styles.webLandingValueBulletTitle}>{item.title}</Text>
+                      <Text style={styles.webLandingValueBulletText}>{item.description}</Text>
+                    </View>
+                  </View>
+                ))}
+              </View>
+            </View>
+
+            <View style={styles.webLandingFeatureRail}>
+              {features.slice(2).map((feature) => (
+                <View key={feature.title} style={styles.webLandingFeatureCard}>
+                  <View style={[styles.webLandingFeatureAccent, { backgroundColor: feature.accent }]} />
+                  <Text style={styles.webLandingFeatureTitle}>{feature.title}</Text>
+                  <Text style={styles.webLandingFeatureText}>{feature.description}</Text>
+                </View>
+              ))}
+              <View style={styles.webLandingFeatureSummary}>
+                <Text style={styles.webLandingFeatureSummaryTitle}>{t("Una pantalla para registrar. Otra para entender.")}</Text>
+                <Text style={styles.webLandingFeatureSummaryText}>
+                  {t("NutriTracker junta escaneo, IA con apoyo contextual y recetas guiadas por ingredientes en un sistema pensado para decidir mejor cada día.")}
+                </Text>
+              </View>
+            </View>
+          </View>
+        </View>
+
+        <View style={styles.webLandingSection}>
+          <View style={styles.webLandingSectionHeader}>
+            <Text style={styles.webLandingSectionTitle}>{t("Cómo funciona")}</Text>
+            <Text style={styles.webLandingSectionSubtitle}>
+              {t("Una secuencia simple para registrar mejor, entender más y ajustar antes de perder el control del día.")}
+            </Text>
+          </View>
+          <View style={[styles.webLandingTimeline, desktop && styles.webLandingTimelineDesktop]}>
+            {steps.map((step, index) => (
+              <View key={step.title} style={[styles.webLandingTimelineStep, desktop && styles.webLandingTimelineStepDesktop]}>
+                <View style={styles.webLandingTimelineHead}>
+                  <View style={styles.webLandingTimelineNode}>
+                    <Text style={styles.webLandingTimelineNodeText}>{`0${index + 1}`}</Text>
+                  </View>
+                  {desktop && index < steps.length - 1 ? <View style={styles.webLandingTimelineConnector} /> : null}
+                </View>
+                <View style={styles.webLandingTimelineBody}>
+                  <Text style={styles.webLandingTimelineTitle}>{step.title}</Text>
+                  <Text style={styles.webLandingTimelineText}>{step.description}</Text>
+                </View>
+              </View>
+            ))}
+          </View>
+        </View>
+
+        <View style={styles.webLandingFinalSection}>
+          <View style={styles.webLandingFinalGlow} />
+          <View style={[styles.webLandingFinalInner, desktop && styles.webLandingFinalInnerDesktop]}>
+            <View style={styles.webLandingFinalCopy}>
+              <Text style={styles.webLandingFinalTitle}>{t("Empieza a registrar mejor desde hoy")}</Text>
+              <Text style={styles.webLandingFinalSubtitle}>
+                {t("Crea tu cuenta para tener objetivos diarios, seguimiento corporal y herramientas de IA dentro del mismo sistema.")}
+              </Text>
+            </View>
+            <View style={[styles.webLandingFinalActions, desktop && styles.webLandingFinalActionsDesktop]}>
+              <PrimaryButton title={t("Crear cuenta")} onPress={onCreate} style={styles.webLandingFinalPrimaryCta} />
+              <SecondaryButton title={t("Iniciar sesión")} onPress={onLogin} style={styles.webLandingFinalSecondaryCta} />
+            </View>
+          </View>
+        </View>
       </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+function AuthWebTopbar(props: {
+  onHome: () => void;
+  menuActions?: Array<{ label: string; onPress: () => void; primary?: boolean }>;
+}) {
+  if (Platform.OS !== "web") {
+    return null;
+  }
+  const { language, setLanguage, t } = useI18n();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuActions = props.menuActions ?? [];
+  return (
+    <>
+      <View style={styles.authWebTopShell}>
+        <View style={styles.authWebTopBar}>
+          <Pressable
+            style={({ pressed }) => [styles.webBrandButton, pressed && styles.webBrandButtonPressed]}
+            onPress={() => {
+              setMenuOpen(false);
+              props.onHome();
+            }}
+          >
+            <Text style={styles.webBrandText}>NutriTracker</Text>
+          </Pressable>
+          <View style={styles.authWebTopControls}>
+            <View style={styles.authWebLanguageSwitch}>
+              {[
+                { value: "es" as const, flag: "🇪🇸", label: "ES" },
+                { value: "en" as const, flag: "🇬🇧", label: "EN" },
+              ].map((option) => (
+                <Pressable
+                  key={option.value}
+                  onPress={() => {
+                    void setLanguage(option.value);
+                  }}
+                  style={({ pressed }) => [
+                    styles.authWebLanguageOption,
+                    language === option.value && styles.authWebLanguageOptionActive,
+                    pressed && styles.authWebLanguageOptionPressed,
+                  ]}
+                >
+                  <Text style={styles.authWebLanguageFlag}>{option.flag}</Text>
+                  <Text style={[styles.authWebLanguageCode, language === option.value && styles.authWebLanguageCodeActive]}>
+                    {option.label}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+            {menuActions.length ? (
+              <Pressable
+                hitSlop={8}
+                style={({ pressed }) => [styles.webProfileButton, pressed && styles.webProfileButtonPressed]}
+                onPress={() => setMenuOpen((current) => !current)}
+              >
+                <View style={styles.webProfileAvatar}>
+                  <Text style={styles.webProfileAvatarText}>N</Text>
+                </View>
+              </Pressable>
+            ) : (
+              <View style={styles.authWebTopSpacer} />
+            )}
+          </View>
+        </View>
+      </View>
+      {menuOpen ? (
+        <View style={styles.authWebMenuLayer} pointerEvents="box-none">
+          <Pressable
+            style={styles.accountMenuBackdrop}
+            onPress={() => {
+              setMenuOpen(false);
+            }}
+          >
+            <View style={styles.accountMenuScrim} />
+          </Pressable>
+          <View style={styles.authWebMenuContainer}>
+            <Pressable style={styles.authWebMenuCard} onPress={() => {}}>
+              <Text style={styles.accountMenuTitle}>{t("Accede a NutriTracker")}</Text>
+              <View style={styles.authWebAccountMenuActions}>
+                {menuActions.map((action) => (
+                  <Pressable
+                    key={action.label}
+                    style={({ pressed }) => [
+                      styles.authWebAccountMenuButton,
+                      action.primary && styles.authWebAccountMenuButtonPrimary,
+                      pressed && styles.authWebAccountMenuButtonPressed,
+                    ]}
+                    onPress={() => {
+                      setMenuOpen(false);
+                      action.onPress();
+                    }}
+                  >
+                    <Text
+                      style={[
+                        styles.authWebAccountMenuButtonText,
+                        action.primary && styles.authWebAccountMenuButtonTextPrimary,
+                      ]}
+                    >
+                      {t(action.label)}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            </Pressable>
+          </View>
+        </View>
+      ) : null}
+    </>
+  );
+}
+
+function WebWizardProgress(props: { step: number; total: number }) {
+  return (
+    <View style={styles.webWizardProgressWrap}>
+      <View style={styles.webWizardProgressTrack}>
+        <View style={[styles.webWizardProgressFill, { width: `${(props.step / props.total) * 100}%` }]} />
+      </View>
+    </View>
+  );
+}
+
+function WebWizardOptionCard(props: {
+  title: string;
+  subtitle: string;
+  active: boolean;
+  onPress: () => void;
+  recommended?: boolean;
+}) {
+  return (
+    <Pressable style={[styles.webWizardOptionCard, props.active && styles.webWizardOptionCardActive]} onPress={props.onPress}>
+      <View style={styles.webWizardOptionCardHeader}>
+        <Text style={[styles.webWizardOptionCardTitle, props.active && styles.webWizardOptionCardTitleActive]}>{props.title}</Text>
+        {props.recommended ? <Text style={styles.webWizardOptionCardRecommended}>Recomendado</Text> : null}
+      </View>
+      <Text style={[styles.webWizardOptionCardSubtitle, props.active && styles.webWizardOptionCardSubtitleActive]}>{props.subtitle}</Text>
+    </Pressable>
+  );
+}
+
+function WebWizardChoiceChip(props: { label: string; active: boolean; onPress: () => void }) {
+  return (
+    <Pressable style={[styles.webWizardChoiceChip, props.active && styles.webWizardChoiceChipActive]} onPress={props.onPress}>
+      <Text style={[styles.webWizardChoiceChipText, props.active && styles.webWizardChoiceChipTextActive]}>{props.label}</Text>
+    </Pressable>
+  );
+}
+
+function WebWizardCheckbox(props: { checked: boolean; label: string; onPress: () => void }) {
+  return (
+    <Pressable style={styles.webWizardCheckboxRow} onPress={props.onPress}>
+      <View style={[styles.webWizardCheckboxBox, props.checked && styles.webWizardCheckboxBoxChecked]}>
+        {props.checked ? <Text style={styles.webWizardCheckboxTick}>✓</Text> : null}
+      </View>
+      <Text style={styles.webWizardCheckboxLabel}>{props.label}</Text>
+    </Pressable>
+  );
+}
+
+function WebSignupWizard({ onBack }: { onBack: () => void }) {
+  const auth = useAuth();
+  const draftSeed = auth.webSignupDraft ?? defaultWebSignupDraft();
+  const [draft, setDraft] = useState<WebSignupDraft>(draftSeed.pendingFinalize ? { ...draftSeed, pendingFinalize: false } : draftSeed);
+  const [birthDateDraftParts, setBirthDateDraftParts] = useState<BirthDateParts>(() => birthDatePartsFromValue(draftSeed.birthDate || "2000-01-01"));
+  const [loading, setLoading] = useState(false);
+  const [displayStep, setDisplayStep] = useState<WebSignupStep>(draftSeed.step);
+  const [incomingStep, setIncomingStep] = useState<WebSignupStep | null>(null);
+  const [transitioning, setTransitioning] = useState(false);
+  const [usernameStatus, setUsernameStatus] = useState<{
+    state: "idle" | "checking" | "available" | "unavailable" | "invalid";
+    message: string;
+  }>({ state: "idle", message: "" });
+  const usernameCheckSeqRef = useRef(0);
+  const currentPaneTranslate = useRef(new Animated.Value(0)).current;
+  const currentPaneOpacity = useRef(new Animated.Value(1)).current;
+  const incomingPaneTranslate = useRef(new Animated.Value(0)).current;
+  const incomingPaneOpacity = useRef(new Animated.Value(0)).current;
+
+  const derivedUsername = useMemo(() => sanitizeUsernameCandidate(draft.displayName), [draft.displayName]);
+  const birthDateAge = useMemo(() => ageFromBirthDateString(draft.birthDate), [draft.birthDate]);
+  const currentWeightKg = useMemo(() => parseWizardCurrentWeightKg(draft), [draft]);
+  const targetWeightKg = useMemo(() => parseWizardTargetWeightKg(draft), [draft]);
+  const heightCm = useMemo(() => parseWizardHeightCm(draft), [draft]);
+  const bmiPreview = useMemo(() => bmiValue(currentWeightKg, heightCm), [currentWeightKg, heightCm]);
+  const weeklyGoalOptions = useMemo(() => buildWeeklyGoalOptions(draft.primaryGoal), [draft.primaryGoal]);
+
+  useEffect(() => {
+    void auth.setWebSignupDraft(draft);
+  }, [auth, draft]);
+
+  useEffect(() => {
+    if (!transitioning && draft.step !== displayStep) {
+      setDisplayStep(draft.step);
+    }
+  }, [displayStep, draft.step, transitioning]);
+
+  useEffect(() => {
+    if (weeklyGoalOptions.some((option) => option.value === draft.weeklyGoalKg)) {
+      return;
+    }
+    const fallback = weeklyGoalOptions.find((option) => option.recommended)?.value ?? weeklyGoalOptions[0]?.value ?? "";
+    setDraft((current) => ({ ...current, weeklyGoalKg: fallback }));
+  }, [draft.weeklyGoalKg, weeklyGoalOptions]);
+
+  useEffect(() => {
+    const normalizedUsername = derivedUsername;
+    if (!draft.displayName.trim()) {
+      setUsernameStatus({ state: "idle", message: "" });
+      return;
+    }
+    if (!normalizedUsername || !/^[a-z0-9._]{3,32}$/.test(normalizedUsername)) {
+      setUsernameStatus({
+        state: "invalid",
+        message: "Usa al menos 3 caracteres válidos. Evita símbolos raros; convertimos espacios en guiones bajos.",
+      });
+      return;
+    }
+
+    setUsernameStatus({
+      state: "checking",
+      message: normalizedUsername !== draft.displayName.trim().toLowerCase() ? `Se guardará como @${normalizedUsername}. Comprobando disponibilidad...` : "Comprobando disponibilidad...",
+    });
+
+    const checkSeq = usernameCheckSeqRef.current + 1;
+    usernameCheckSeqRef.current = checkSeq;
+    const timer = setTimeout(() => {
+      void (async () => {
+        try {
+          const availability = await auth.checkUsernameAvailability(normalizedUsername);
+          if (usernameCheckSeqRef.current !== checkSeq) {
+            return;
+          }
+          if (availability.available) {
+            setUsernameStatus({
+              state: "available",
+              message: normalizedUsername !== draft.displayName.trim().toLowerCase() ? `Perfecto. Se usará @${normalizedUsername}.` : "Nombre disponible.",
+            });
+            return;
+          }
+          setUsernameStatus({
+            state: "unavailable",
+            message: availability.reason ?? "Ese nombre ya está en uso.",
+          });
+        } catch {
+          if (usernameCheckSeqRef.current !== checkSeq) {
+            return;
+          }
+          setUsernameStatus({
+            state: "idle",
+            message: normalizedUsername !== draft.displayName.trim().toLowerCase() ? `Se usará @${normalizedUsername}.` : "",
+          });
+        }
+      })();
+    }, 320);
+
+    return () => clearTimeout(timer);
+  }, [auth, derivedUsername, draft.displayName]);
+
+  const updateDraft = useCallback((patch: Partial<WebSignupDraft>) => {
+    setDraft((current) => ({ ...current, ...patch }));
+  }, []);
+
+  const updateBirthDatePart = useCallback((part: keyof BirthDateParts, rawValue: string) => {
+    const sanitized = rawValue.replace(/\D/g, "").slice(0, part === "year" ? 4 : 2);
+    setBirthDateDraftParts((current) => {
+      const nextParts = { ...current, [part]: sanitized };
+      const nextValue = birthDateValueFromParts(nextParts);
+      if (nextValue) {
+        updateDraft({ birthDate: nextValue });
+      }
+      return nextParts;
+    });
+  }, [updateDraft]);
+
+  const switchMeasurementSystem = useCallback((system: MeasurementSystem) => {
+    setDraft((current) => syncDraftMeasurementSystem(current, system));
+  }, []);
+
+  const validateStep = useCallback((step: WebSignupStep): boolean => {
+    if (step === 1) {
+      if (!draft.displayName.trim()) {
+        showAlert("Nombre", "Escribe cómo quieres aparecer en NutriTracker.");
+        return false;
+      }
+      if (!derivedUsername || usernameStatus.state === "invalid") {
+        showAlert("Nombre", usernameStatus.message || "Revisa el nombre que quieres usar.");
+        return false;
+      }
+      if (usernameStatus.state === "checking") {
+        showAlert("Nombre", "Estamos comprobando si el nombre está libre.");
+        return false;
+      }
+      if (usernameStatus.state === "unavailable") {
+        showAlert("Nombre", usernameStatus.message || "Ese nombre ya está en uso.");
+        return false;
+      }
+      return true;
+    }
+    if (step === 4) {
+      if (draft.sex !== "male" && draft.sex !== "female") {
+        showAlert("Sexo", "Selecciona sexo para continuar.");
+        return false;
+      }
+      const parsedBirthDate = parseBirthDateInput(draft.birthDate);
+      if (!parsedBirthDate) {
+        showAlert("Fecha de nacimiento", "Introduce una fecha válida.");
+        return false;
+      }
+      const age = ageFromBirthDateString(draft.birthDate);
+      if (age === null || age < 13) {
+        showAlert("Fecha de nacimiento", "Debes tener al menos 13 años.");
+        return false;
+      }
+      return true;
+    }
+    if (step === 5) {
+      if (!currentWeightKg || !heightCm) {
+        showAlert("Medidas", "Completa altura y peso actual.");
+        return false;
+      }
+      return true;
+    }
+    if (step === 7) {
+      if (!draft.acceptedTerms) {
+        showAlert("Términos", "Debes aceptar los términos para continuar.");
+        return false;
+      }
+      return true;
+    }
+    return true;
+  }, [currentWeightKg, derivedUsername, draft.acceptedTerms, draft.birthDate, draft.displayName, heightCm, usernameStatus.message, usernameStatus.state]);
+
+  const transitionToStep = useCallback(
+    (nextStep: WebSignupStep, direction: 1 | -1) => {
+      if (transitioning || nextStep === displayStep) {
+        return;
+      }
+      setIncomingStep(nextStep);
+      setTransitioning(true);
+      const startOffset = direction === 1 ? 56 : -56;
+      currentPaneTranslate.setValue(0);
+      currentPaneOpacity.setValue(1);
+      incomingPaneTranslate.setValue(startOffset);
+      incomingPaneOpacity.setValue(0.48);
+      Animated.parallel([
+        Animated.timing(currentPaneTranslate, {
+          toValue: direction === 1 ? -56 : 56,
+          duration: 210,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.timing(currentPaneOpacity, {
+          toValue: 0.16,
+          duration: 180,
+          easing: Easing.out(Easing.quad),
+          useNativeDriver: true,
+        }),
+        Animated.timing(incomingPaneTranslate, {
+          toValue: 0,
+          duration: 220,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.timing(incomingPaneOpacity, {
+          toValue: 1,
+          duration: 200,
+          easing: Easing.out(Easing.quad),
+          useNativeDriver: true,
+        }),
+      ]).start(() => {
+        setDisplayStep(nextStep);
+        setIncomingStep(null);
+        currentPaneTranslate.setValue(0);
+        currentPaneOpacity.setValue(1);
+        incomingPaneTranslate.setValue(0);
+        incomingPaneOpacity.setValue(0);
+        setTransitioning(false);
+        setDraft((current) => ({ ...current, step: nextStep }));
+      });
+    },
+    [currentPaneOpacity, currentPaneTranslate, displayStep, incomingPaneOpacity, incomingPaneTranslate, transitioning],
+  );
+
+  const goNext = () => {
+    if (!validateStep(displayStep)) {
+      return;
+    }
+    if (displayStep < 7) {
+      transitionToStep((displayStep + 1) as WebSignupStep, 1);
+    }
+  };
+
+  const goBack = () => {
+    if (displayStep === 1) {
+      onBack();
+      return;
+    }
+    transitionToStep((displayStep - 1) as WebSignupStep, -1);
+  };
+
+  const submit = async () => {
+    if (!validateStep(7)) {
+      return;
+    }
+    if (!draft.email.trim() || !draft.password.trim()) {
+      showAlert("Cuenta", "Completa email y contraseña para crear la cuenta.");
+      return;
+    }
+    if (draft.password.length < 8) {
+      showAlert("Contraseña", "Debe tener al menos 8 caracteres.");
+      return;
+    }
+    if (draft.password !== draft.confirmPassword) {
+      showAlert("Contraseña", "Las contraseñas no coinciden.");
+      return;
+    }
+    if (!validateStep(1) || !validateStep(4) || !validateStep(5)) {
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await auth.register({
+        username: derivedUsername,
+        email: draft.email.trim().toLowerCase(),
+        password: draft.password,
+        sex: draft.sex,
+        birth_date: draft.birthDate,
+      });
+      await auth.setWebSignupDraft({ ...draft, pendingFinalize: true, email: draft.email.trim().toLowerCase() });
+      showAlert("Cuenta creada", response.message);
+    } catch (error) {
+      showAlert("Registro", parseApiError(error));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const submitWithGoogle = async (credential: string) => {
+    if (!validateStep(1) || !validateStep(4) || !validateStep(5) || !validateStep(7)) {
+      return;
+    }
+    setLoading(true);
+    try {
+      await auth.setWebSignupDraft({ ...draft, pendingFinalize: true });
+      await auth.googleSignIn({
+        credential,
+        username: derivedUsername,
+        sex: draft.sex,
+        birth_date: draft.birthDate,
+      });
+    } catch (error) {
+      await auth.setWebSignupDraft({ ...draft, pendingFinalize: false });
+      showAlert("Google", parseApiError(error));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const stepCopy = useCallback((step: WebSignupStep) => {
+    if (step === 1) {
+      return {
+        title: "¿Cuál es tu nombre?",
+        subtitle: "Lo usaremos como alias público dentro de NutriTracker. Puede ser tu nombre o un alias corto.",
+      };
+    }
+    if (step === 2) {
+      return {
+        title: "¿Qué quieres conseguir?",
+        subtitle: "Esto nos ayuda a plantear objetivos diarios y ritmo semanal con sentido.",
+      };
+    }
+    if (step === 3) {
+      return {
+        title: "¿Cómo es tu actividad base?",
+        subtitle: "Piensa en tu día normal, no en tu mejor semana del año.",
+      };
+    }
+    if (step === 4) {
+      return {
+        title: "Perfil básico",
+        subtitle: "Sexo y fecha de nacimiento para personalizar el punto de partida.",
+      };
+    }
+    if (step === 5) {
+      return {
+        title: "Altura y peso",
+        subtitle: "Tu plan se calculará con estos datos. Puedes usar sistema métrico o imperial.",
+      };
+    }
+    if (step === 6) {
+      return {
+        title: "Objetivo semanal",
+        subtitle: "Elige un ritmo que puedas sostener. Mejor realista que heroico dos días.",
+      };
+    }
+    return {
+      title: "Crea tu cuenta",
+      subtitle: "Último paso. Puedes seguir con email y contraseña o usar Google si ya lo tienes configurado.",
+    };
+  }, []);
+
+  const renderStepBody = (step: WebSignupStep) => {
+    if (step === 1) {
+      return (
+        <View style={styles.webWizardSectionStack}>
+          <InputField
+            label="Nombre o alias"
+            value={draft.displayName}
+            onChangeText={(value) => updateDraft({ displayName: value })}
+            placeholder="Ej: DanielFit"
+            autoCapitalize="words"
+            autoFocus
+            containerStyle={styles.webWizardFieldCompact}
+            labelStyle={styles.webWizardFieldLabel}
+            inputStyle={styles.webWizardFieldInput}
+            helperText={usernameStatus.message || "Será el nombre público que verá el resto en tu perfil."}
+            invalid={usernameStatus.state === "invalid" || usernameStatus.state === "unavailable"}
+          />
+          <View style={styles.webWizardInlineNote}>
+            <Text style={styles.webWizardInlineNoteText}>Tu perfil se guardará como @{derivedUsername || "nombre_usuario"}.</Text>
+          </View>
+        </View>
+      );
+    }
+
+    if (step === 2) {
+      const options: Array<{ value: WizardPrimaryGoal; title: string; subtitle: string }> = [
+        { value: "lose_weight", title: "Perder peso", subtitle: "Reducir grasa con objetivos realistas y control de macros." },
+        { value: "maintain_weight", title: "Mantener el peso", subtitle: "Consolidar hábitos y sostener energía diaria." },
+        { value: "gain_weight", title: "Ganar peso", subtitle: "Subir kcal de forma estructurada y medible." },
+        { value: "gain_muscle", title: "Ganar músculo", subtitle: "Priorizar proteína y superávit moderado." },
+        { value: "improve_nutrition", title: "Mejorar alimentación", subtitle: "Comer mejor sin obsesionarte con la báscula." },
+        { value: "increase_steps", title: "Aumentar pasos", subtitle: "Moverte más mientras mantienes el control nutricional." },
+      ];
+      return (
+        <View style={styles.webWizardOptionGrid}>
+          {options.map((option) => (
+            <WebWizardOptionCard
+              key={option.value}
+              title={option.title}
+              subtitle={option.subtitle}
+              active={draft.primaryGoal === option.value}
+              onPress={() => updateDraft({ primaryGoal: option.value })}
+            />
+          ))}
+        </View>
+      );
+    }
+
+    if (step === 3) {
+      const options: Array<{ value: ActivityLevel; title: string; subtitle: string }> = [
+        { value: "sedentary", title: "Muy poco activo", subtitle: "Trabajo sentado y poco movimiento diario." },
+        { value: "light", title: "Ligero", subtitle: "Algo de paseo o actividad suave varias veces a la semana." },
+        { value: "moderate", title: "Moderado", subtitle: "Te mueves con frecuencia y entrenas de forma regular." },
+        { value: "active", title: "Activo", subtitle: "Entrenas fuerte o tu día ya exige bastante movimiento." },
+        { value: "athlete", title: "Muy activo", subtitle: "Volumen alto de entrenamiento o trabajo físico constante." },
+      ];
+      return (
+        <View style={styles.webWizardOptionColumn}>
+          {options.map((option) => (
+            <WebWizardOptionCard
+              key={option.value}
+              title={option.title}
+              subtitle={option.subtitle}
+              active={draft.activityLevel === option.value}
+              onPress={() => updateDraft({ activityLevel: option.value })}
+            />
+          ))}
+        </View>
+      );
+    }
+
+    if (step === 4) {
+      return (
+        <View style={styles.webWizardSectionStack}>
+          <View style={styles.webWizardFieldSection}>
+            <Text style={styles.webWizardSectionLabel}>Sexo</Text>
+            <View style={styles.webWizardChipRow}>
+              <WebWizardChoiceChip label="Masculino" active={draft.sex === "male"} onPress={() => updateDraft({ sex: "male" })} />
+              <WebWizardChoiceChip label="Femenino" active={draft.sex === "female"} onPress={() => updateDraft({ sex: "female" })} />
+            </View>
+          </View>
+
+          <View style={styles.webWizardFieldSection}>
+            <View style={styles.webWizardFieldSectionHeader}>
+              <Text style={styles.webWizardSectionLabel}>Fecha de nacimiento</Text>
+              {birthDateAge !== null ? (
+                <View style={styles.webWizardAgePill}>
+                  <Text style={styles.webWizardAgePillText}>{birthDateAge} años</Text>
+                </View>
+              ) : null}
+            </View>
+            <View style={styles.webWizardBirthRow}>
+              <View style={[styles.webWizardBirthCell, styles.webWizardBirthCellSmall]}>
+                <Text style={styles.webWizardBirthLabel}>Día</Text>
+                <TextInput
+                  value={birthDateDraftParts.day}
+                  onChangeText={(value) => updateBirthDatePart("day", value)}
+                  placeholder="DD"
+                  keyboardType="numeric"
+                  inputMode="numeric"
+                  style={styles.webWizardBirthInput}
+                />
+              </View>
+              <View style={[styles.webWizardBirthCell, styles.webWizardBirthCellSmall]}>
+                <Text style={styles.webWizardBirthLabel}>Mes</Text>
+                <TextInput
+                  value={birthDateDraftParts.month}
+                  onChangeText={(value) => updateBirthDatePart("month", value)}
+                  placeholder="MM"
+                  keyboardType="numeric"
+                  inputMode="numeric"
+                  style={styles.webWizardBirthInput}
+                />
+              </View>
+              <View style={[styles.webWizardBirthCell, styles.webWizardBirthCellLarge]}>
+                <Text style={styles.webWizardBirthLabel}>Año</Text>
+                <TextInput
+                  value={birthDateDraftParts.year}
+                  onChangeText={(value) => updateBirthDatePart("year", value)}
+                  placeholder="YYYY"
+                  keyboardType="numeric"
+                  inputMode="numeric"
+                  style={styles.webWizardBirthInput}
+                />
+              </View>
+            </View>
+          </View>
+        </View>
+      );
+    }
+
+    if (step === 5) {
+      return (
+        <View style={styles.webWizardSectionStack}>
+          <View style={styles.webWizardFieldSection}>
+            <View style={styles.webWizardFieldSectionHeader}>
+              <Text style={styles.webWizardSectionLabel}>Sistema de unidades</Text>
+              <Text style={styles.webWizardSectionHelper}>Puedes cambiar entre métrico e imperial cuando quieras.</Text>
+            </View>
+            <View style={styles.webWizardChipRow}>
+              <WebWizardChoiceChip label="Métrico" active={draft.measurementSystem === "metric"} onPress={() => switchMeasurementSystem("metric")} />
+              <WebWizardChoiceChip label="Imperial" active={draft.measurementSystem === "imperial"} onPress={() => switchMeasurementSystem("imperial")} />
+            </View>
+          </View>
+
+          {draft.measurementSystem === "metric" ? (
+            <View style={styles.webWizardMetricGrid}>
+              <InputField
+                label="Altura (cm)"
+                value={draft.heightCm}
+                onChangeText={(value) => updateDraft({ heightCm: value })}
+                keyboardType="numeric"
+                placeholder="Ej: 178"
+                containerStyle={styles.webWizardFieldCompact}
+                labelStyle={styles.webWizardFieldLabel}
+                inputStyle={styles.webWizardFieldInput}
+              />
+              <InputField
+                label="Peso actual (kg)"
+                value={draft.currentWeightKg}
+                onChangeText={(value) => updateDraft({ currentWeightKg: value })}
+                keyboardType="numeric"
+                placeholder="Ej: 82"
+                containerStyle={styles.webWizardFieldCompact}
+                labelStyle={styles.webWizardFieldLabel}
+                inputStyle={styles.webWizardFieldInput}
+              />
+              <InputField
+                label="Peso deseado (kg)"
+                value={draft.targetWeightKg}
+                onChangeText={(value) => updateDraft({ targetWeightKg: value })}
+                keyboardType="numeric"
+                placeholder="Ej: 76"
+                containerStyle={styles.webWizardFieldCompact}
+                labelStyle={styles.webWizardFieldLabel}
+                inputStyle={styles.webWizardFieldInput}
+              />
+            </View>
+          ) : (
+            <View style={styles.webWizardMetricGrid}>
+              <View style={styles.webWizardImperialHeightRow}>
+                <InputField
+                  label="Altura (ft)"
+                  value={draft.heightFt}
+                  onChangeText={(value) => updateDraft({ heightFt: value })}
+                  keyboardType="numeric"
+                  placeholder="5"
+                  containerStyle={styles.webWizardFieldCompact}
+                  labelStyle={styles.webWizardFieldLabel}
+                  inputStyle={styles.webWizardFieldInput}
+                />
+                <InputField
+                  label="Altura (in)"
+                  value={draft.heightIn}
+                  onChangeText={(value) => updateDraft({ heightIn: value })}
+                  keyboardType="numeric"
+                  placeholder="10"
+                  containerStyle={styles.webWizardFieldCompact}
+                  labelStyle={styles.webWizardFieldLabel}
+                  inputStyle={styles.webWizardFieldInput}
+                />
+              </View>
+              <InputField
+                label="Peso actual (lb)"
+                value={draft.currentWeightLb}
+                onChangeText={(value) => updateDraft({ currentWeightLb: value })}
+                keyboardType="numeric"
+                placeholder="Ej: 181"
+                containerStyle={styles.webWizardFieldCompact}
+                labelStyle={styles.webWizardFieldLabel}
+                inputStyle={styles.webWizardFieldInput}
+              />
+              <InputField
+                label="Peso deseado (lb)"
+                value={draft.targetWeightLb}
+                onChangeText={(value) => updateDraft({ targetWeightLb: value })}
+                keyboardType="numeric"
+                placeholder="Ej: 168"
+                containerStyle={styles.webWizardFieldCompact}
+                labelStyle={styles.webWizardFieldLabel}
+                inputStyle={styles.webWizardFieldInput}
+              />
+            </View>
+          )}
+
+          <View style={styles.webWizardSummaryStrip}>
+            <View style={styles.webWizardSummaryMetric}>
+              <Text style={styles.webWizardSummaryMetricLabel}>IMC estimado</Text>
+              <Text style={styles.webWizardSummaryMetricValue}>{bmiPreview != null ? bmiPreview.toFixed(1) : "--"}</Text>
+            </View>
+            <View style={styles.webWizardSummaryMetric}>
+              <Text style={styles.webWizardSummaryMetricLabel}>Meta</Text>
+              <Text style={styles.webWizardSummaryMetricValue}>
+                {currentWeightKg != null && targetWeightKg != null ? `${(targetWeightKg - currentWeightKg).toFixed(1)} kg` : "--"}
+              </Text>
+            </View>
+          </View>
+        </View>
+      );
+    }
+
+    if (step === 6) {
+      return (
+        <View style={styles.webWizardOptionColumn}>
+          {weeklyGoalOptions.map((option) => (
+            <WebWizardOptionCard
+              key={`${draft.primaryGoal}-${option.value || "none"}`}
+              title={option.label}
+              subtitle={option.description}
+              active={draft.weeklyGoalKg === option.value}
+              recommended={Boolean(option.recommended)}
+              onPress={() => updateDraft({ weeklyGoalKg: option.value })}
+            />
+          ))}
+        </View>
+      );
+    }
+
+    return (
+      <View style={styles.webWizardSectionStack}>
+        <InputField
+          label="Email"
+          value={draft.email}
+          onChangeText={(value) => updateDraft({ email: value })}
+          keyboardType="email-address"
+          placeholder="tu@email.com"
+          containerStyle={styles.webWizardFieldCompact}
+          labelStyle={styles.webWizardFieldLabel}
+          inputStyle={styles.webWizardFieldInput}
+        />
+        <InputField
+          label="Contraseña"
+          value={draft.password}
+          onChangeText={(value) => updateDraft({ password: value })}
+          secureTextEntry
+          placeholder="Mínimo 8 caracteres"
+          containerStyle={styles.webWizardFieldCompact}
+          labelStyle={styles.webWizardFieldLabel}
+          inputStyle={styles.webWizardFieldInput}
+        />
+        {draft.password ? (
+          <View style={styles.passwordStrengthWrap}>
+            <View style={styles.passwordStrengthHeader}>
+              <Text style={styles.helperText}>Seguridad de contraseña</Text>
+              <Text style={[styles.passwordStrengthLabel, { color: passwordStrengthMeta(draft.password).color }]}>
+                {passwordStrengthMeta(draft.password).label}
+              </Text>
+            </View>
+            <View style={styles.passwordStrengthTrack}>
+              <View
+                style={[
+                  styles.passwordStrengthFill,
+                  {
+                    width: `${Math.min(100, (passwordStrengthMeta(draft.password).score / 6) * 100)}%`,
+                    backgroundColor: passwordStrengthMeta(draft.password).color,
+                  },
+                ]}
+              />
+            </View>
+          </View>
+        ) : null}
+        <InputField
+          label="Confirmar contraseña"
+          value={draft.confirmPassword}
+          onChangeText={(value) => updateDraft({ confirmPassword: value })}
+          secureTextEntry
+          placeholder="Repite la contraseña"
+          containerStyle={styles.webWizardFieldCompact}
+          labelStyle={styles.webWizardFieldLabel}
+          inputStyle={styles.webWizardFieldInput}
+        />
+        <WebWizardCheckbox
+          checked={draft.acceptedTerms}
+          label="Acepto los términos y que NutriTracker use estos datos para calcular mi plan."
+          onPress={() => updateDraft({ acceptedTerms: !draft.acceptedTerms })}
+        />
+
+        <View style={styles.webWizardDividerRow}>
+          <View style={styles.webWizardDividerLine} />
+          <Text style={styles.webWizardDividerText}>o</Text>
+          <View style={styles.webWizardDividerLine} />
+        </View>
+
+        <GoogleAuthButton
+          mode="continue_with"
+          variant="inline"
+          disabled={loading}
+          showConfigHint
+          helperText="Si prefieres no crear contraseña, termina el alta con tu cuenta de Google."
+          missingConfigText="Falta configurar EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID en el frontend web para activar Google Sign-In."
+          onCredential={(credential) => {
+            void submitWithGoogle(credential);
+          }}
+        />
+      </View>
+    );
+  };
+
+  const renderStepPane = (step: WebSignupStep) => {
+    const copy = stepCopy(step);
+    return (
+      <View style={styles.webOnboardingStepPaneContent}>
+        <Text style={styles.webOnboardingStepTitle}>{copy.title}</Text>
+        <Text style={styles.webOnboardingStepSubtitle}>{copy.subtitle}</Text>
+        <View style={styles.webOnboardingStepBody}>{renderStepBody(step)}</View>
+      </View>
+    );
+  };
+
+  const visualStep = incomingStep ?? displayStep;
+
+  return (
+    <SafeAreaView style={styles.webOnboardingScreen}>
+      <AuthWebTopbar onHome={onBack} />
+      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.flex1}>
+        <ScrollView contentContainerStyle={styles.webOnboardingScroll} keyboardShouldPersistTaps="handled">
+          <View style={styles.webOnboardingBrandBlock}>
+            <Text style={styles.webOnboardingBrandEyebrow}>NUTRITRACKER</Text>
+            <Text style={styles.webOnboardingBrandTitle}>Configura tu plan en unos pasos claros</Text>
+            <Text style={styles.webOnboardingBrandSubtitle}>Nutrición, macros y seguimiento corporal sin convertir esto en un formulario infinito.</Text>
+          </View>
+
+          <View style={styles.webOnboardingCard}>
+            <WebWizardProgress step={visualStep} total={7} />
+
+            <View style={styles.webOnboardingStepShell}>
+              <Animated.View
+                style={[
+                  styles.webOnboardingStepPane,
+                  {
+                    transform: [{ translateX: currentPaneTranslate }],
+                    opacity: currentPaneOpacity,
+                  },
+                ]}
+              >
+                {renderStepPane(displayStep)}
+              </Animated.View>
+              {incomingStep ? (
+                <Animated.View
+                  pointerEvents="none"
+                  style={[
+                    styles.webOnboardingStepPane,
+                    styles.webOnboardingStepPaneOverlay,
+                    {
+                      transform: [{ translateX: incomingPaneTranslate }],
+                      opacity: incomingPaneOpacity,
+                    },
+                  ]}
+                >
+                  {renderStepPane(incomingStep)}
+                </Animated.View>
+              ) : null}
+            </View>
+
+            <View style={styles.webOnboardingFooter}>
+              <SecondaryButton
+                title={displayStep === 1 ? "Volver" : "Atrás"}
+                onPress={goBack}
+                disabled={loading || transitioning}
+                style={styles.webOnboardingSecondaryBtn}
+                textStyle={styles.webOnboardingSecondaryBtnText}
+              />
+              {displayStep < 7 ? (
+                <PrimaryButton title="Siguiente" onPress={goNext} disabled={loading || transitioning} style={styles.webOnboardingPrimaryBtn} />
+              ) : (
+                <PrimaryButton
+                  title="Continuar"
+                  loadingTitle="Creando cuenta..."
+                  onPress={() => void submit()}
+                  loading={loading}
+                  disabled={transitioning}
+                  style={styles.webOnboardingPrimaryBtn}
+                />
+              )}
+            </View>
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
+  );
+}
+
+function WebOnboardingFinalizeScreen() {
+  const auth = useAuth();
+  const draft = auth.webSignupDraft;
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const startedRef = useRef(false);
+  const goToWelcome = useCallback(() => {
+    if (auth.user) {
+      void auth.logout();
+      return;
+    }
+    auth.clearPendingVerification();
+  }, [auth]);
+
+  const finalize = useCallback(async () => {
+    if (!draft) {
+      return;
+    }
+    const heightCm = parseWizardHeightCm(draft);
+    const weightKg = parseWizardCurrentWeightKg(draft);
+    if (!heightCm || !weightKg) {
+      throw new Error("Faltan altura o peso para completar el plan inicial.");
+    }
+    const today = formatDateLocal(new Date());
+    await auth.saveProfile({
+      weight_kg: weightKg,
+      height_cm: heightCm,
+      age: ageFromBirthDateString(auth.user?.birth_date),
+      sex: auth.user?.sex ?? draft.sex,
+      activity_level: draft.activityLevel,
+      goal_type: goalTypeFromPrimaryGoal(draft.primaryGoal),
+      weekly_weight_goal_kg: draft.weeklyGoalKg ? Number(draft.weeklyGoalKg) : null,
+      waist_cm: null,
+      neck_cm: null,
+      hip_cm: null,
+      chest_cm: null,
+      arm_cm: null,
+      thigh_cm: null,
+    });
+    const analysis = await auth.fetchAnalysis(today);
+    await auth.saveGoal(today, analysis.recommended_goal);
+    await auth.setWebSignupDraft(null);
+    await auth.refreshMe();
+  }, [auth, draft]);
+
+  useEffect(() => {
+    if (startedRef.current || !draft?.pendingFinalize) {
+      return;
+    }
+    startedRef.current = true;
+    void (async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        await finalize();
+      } catch (err) {
+        setError(parseApiError(err));
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [draft?.pendingFinalize, finalize]);
+
+  if (!draft?.pendingFinalize) {
+    return null;
+  }
+
+  return (
+    <SafeAreaView style={styles.webOnboardingScreen}>
+      <AuthWebTopbar onHome={goToWelcome} />
+      <View style={styles.webOnboardingCenterWrap}>
+        <View style={[styles.webOnboardingCard, styles.webOnboardingFinalizeCard]}>
+          <WebWizardProgress step={7} total={7} />
+          <Text style={styles.webOnboardingStepTitle}>Estamos preparando tu plan</Text>
+          <Text style={styles.webOnboardingStepSubtitle}>Guardamos tu perfil y calculamos tus objetivos diarios para dejarte dentro directamente.</Text>
+          {loading ? <ActivityIndicator color={theme.accent} size="large" /> : null}
+          {error ? <Text style={styles.webOnboardingErrorText}>{error}</Text> : null}
+          <View style={styles.webOnboardingFooter}>
+            {error ? (
+              <>
+                <SecondaryButton
+                  title="Abrir onboarding clásico"
+                  onPress={() => {
+                    void auth.setWebSignupDraft(draft ? { ...draft, pendingFinalize: false } : null);
+                  }}
+                  style={styles.webOnboardingSecondaryBtn}
+                  textStyle={styles.webOnboardingSecondaryBtnText}
+                />
+                <PrimaryButton title="Reintentar" onPress={() => void finalize()} style={styles.webOnboardingPrimaryBtn} />
+              </>
+            ) : null}
+          </View>
+        </View>
+      </View>
     </SafeAreaView>
   );
 }
@@ -3636,6 +5265,9 @@ function WelcomeScreen({ onCreate, onLogin }: { onCreate: () => void; onLogin: (
 function SignupScreen({ onBack }: { onBack: () => void }) {
   const auth = useAuth();
   const isWeb = Platform.OS === "web";
+  if (isWeb) {
+    return <WebSignupWizard onBack={onBack} />;
+  }
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -4022,8 +5654,151 @@ function SignupScreen({ onBack }: { onBack: () => void }) {
   );
 }
 
-function LoginScreen({ onBack }: { onBack: () => void }) {
+function WebLoginScreen({ onBack, onCreate }: { onBack: () => void; onCreate: () => void }) {
   const auth = useAuth();
+  const [identifier, setIdentifier] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
+
+  const submit = async () => {
+    if (!identifier.trim() || !password.trim()) {
+      setErrorMessage("Completa tu correo o usuario y la contraseña.");
+      return;
+    }
+
+    setErrorMessage("");
+    setLoading(true);
+    try {
+      await auth.login({ email: identifier.trim().toLowerCase(), password });
+    } catch (error) {
+      const message = parseApiError(error);
+      setErrorMessage(message.includes("Endpoint no encontrado") ? `${message}\nURL API activa: ${auth.apiBaseUrl}` : message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const submitWithGoogle = async (credential: string) => {
+    setErrorMessage("");
+    setLoading(true);
+    try {
+      await auth.googleSignIn({ credential });
+    } catch (error) {
+      setErrorMessage(parseApiError(error));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <SafeAreaView style={styles.webOnboardingScreen}>
+      <AuthWebTopbar onHome={onBack} />
+      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.flex1}>
+        <ScrollView contentContainerStyle={styles.webOnboardingScroll} keyboardShouldPersistTaps="handled">
+          <View style={styles.webOnboardingBrandBlock}>
+            <Text style={styles.webOnboardingBrandEyebrow}>NUTRITRACKER</Text>
+            <Text style={styles.webOnboardingBrandTitle}>Bienvenido de nuevo</Text>
+            <Text style={styles.webOnboardingBrandSubtitle}>Accede para seguir con tu nutrición, progreso y objetivos.</Text>
+          </View>
+
+          <View style={[styles.webOnboardingCard, styles.webAuthCardCompact]}>
+            <View style={styles.webAuthHeader}>
+              <Text style={styles.webAuthCardTitle}>Inicia sesión en NutriTracker</Text>
+              <Text style={styles.webAuthCardSubtitle}>Usa tu correo o tu nombre de usuario si ya tienes cuenta verificada.</Text>
+            </View>
+
+            <InputField
+              label="Correo electrónico o nombre de usuario"
+              value={identifier}
+              onChangeText={(value) => {
+                setIdentifier(value);
+                if (errorMessage) {
+                  setErrorMessage("");
+                }
+              }}
+              placeholder="Ej: danielfit o tu@email.com"
+              autoCapitalize="none"
+              autoFocus
+              containerStyle={styles.webWizardFieldCompact}
+              labelStyle={styles.webWizardFieldLabel}
+              inputStyle={styles.webWizardFieldInput}
+              invalid={Boolean(errorMessage) && !identifier.trim()}
+            />
+            <InputField
+              label="Contraseña"
+              value={password}
+              onChangeText={(value) => {
+                setPassword(value);
+                if (errorMessage) {
+                  setErrorMessage("");
+                }
+              }}
+              secureTextEntry
+              placeholder="Tu contraseña"
+              containerStyle={styles.webWizardFieldCompact}
+              labelStyle={styles.webWizardFieldLabel}
+              inputStyle={styles.webWizardFieldInput}
+              invalid={Boolean(errorMessage) && !password.trim()}
+              onSubmitEditing={() => {
+                void submit();
+              }}
+            />
+
+            {errorMessage ? (
+              <View style={styles.webAuthErrorCard}>
+                <Text style={styles.webAuthErrorText}>{errorMessage}</Text>
+              </View>
+            ) : null}
+
+            <PrimaryButton
+              title="Iniciar sesión"
+              loadingTitle="Entrando..."
+              onPress={() => void submit()}
+              loading={loading}
+              style={styles.webOnboardingPrimaryBtn}
+            />
+
+            <View style={styles.webWizardDividerRow}>
+              <View style={styles.webWizardDividerLine} />
+              <Text style={styles.webWizardDividerText}>o</Text>
+              <View style={styles.webWizardDividerLine} />
+            </View>
+
+            <GoogleAuthButton
+              mode="continue_with"
+              variant="inline"
+              disabled={loading}
+              showConfigHint
+              helperText="Entra con la misma cuenta de Google con la que creaste el perfil."
+              missingConfigText="Falta configurar EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID en el frontend web para activar Google Sign-In."
+              onCredential={(credential) => {
+                void submitWithGoogle(credential);
+              }}
+            />
+
+            <View style={styles.webAuthLinkRow}>
+              <Text style={styles.webAuthLinkLabel}>¿No tienes cuenta?</Text>
+              <Pressable
+                onPress={onCreate}
+                style={({ pressed }) => [styles.webAuthLinkAction, pressed && styles.webAuthLinkActionPressed]}
+              >
+                <Text style={styles.webAuthLinkActionText}>Crear cuenta</Text>
+              </Pressable>
+            </View>
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
+  );
+}
+
+function LoginScreen({ onBack, onCreate }: { onBack: () => void; onCreate: () => void }) {
+  const auth = useAuth();
+  const isWeb = Platform.OS === "web";
+  if (isWeb) {
+    return <WebLoginScreen onBack={onBack} onCreate={onCreate} />;
+  }
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -4091,18 +5866,26 @@ function AuthStack() {
     return <SignupScreen onBack={() => setScreen("welcome")} />;
   }
   if (screen === "login") {
-    return <LoginScreen onBack={() => setScreen("welcome")} />;
+    return <LoginScreen onBack={() => setScreen("welcome")} onCreate={() => setScreen("signup")} />;
   }
   return <WelcomeScreen onCreate={() => setScreen("signup")} onLogin={() => setScreen("login")} />;
 }
 
 function VerifyEmailOnlyScreen() {
   const auth = useAuth();
+  const isWeb = Platform.OS === "web";
   const email = auth.user?.email ?? auth.pendingVerificationEmail;
   const [code, setCode] = useState("");
   const [loading, setLoading] = useState(false);
   const [resending, setResending] = useState(false);
   const [cooldown, setCooldown] = useState(0);
+  const goToWelcome = useCallback(() => {
+    if (auth.user) {
+      void auth.logout();
+      return;
+    }
+    auth.clearPendingVerification();
+  }, [auth]);
 
   useEffect(() => {
     if (cooldown <= 0) {
@@ -4115,6 +5898,7 @@ function VerifyEmailOnlyScreen() {
   if (!email) {
     return (
       <SafeAreaView style={styles.screen}>
+        {isWeb ? <AuthWebTopbar onHome={goToWelcome} /> : null}
         <View style={styles.centered}>
           <Text style={styles.helperText}>Falta email para verificar.</Text>
           <SecondaryButton title="Volver" onPress={auth.clearPendingVerification} />
@@ -4154,8 +5938,9 @@ function VerifyEmailOnlyScreen() {
 
   return (
     <SafeAreaView style={styles.screen}>
+      {isWeb ? <AuthWebTopbar onHome={goToWelcome} /> : null}
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.flex1}>
-        <ScrollView contentContainerStyle={styles.authScroll} keyboardShouldPersistTaps="handled">
+        <ScrollView contentContainerStyle={[styles.authScroll, isWeb && styles.authScrollWebOffset]} keyboardShouldPersistTaps="handled">
           <AppHeader title="Verificar email" subtitle={tx("Código OTP de 6 dígitos para {{email}}", { email })} />
 
           <InputField
@@ -4232,13 +6017,21 @@ function BmiBar({ value }: { value: number | null }) {
 
 function OnboardingWizard() {
   const auth = useAuth();
+  const webSignupDraft = auth.webSignupDraft;
+  if (Platform.OS === "web" && webSignupDraft?.pendingFinalize) {
+    return <WebOnboardingFinalizeScreen />;
+  }
   const [step, setStep] = useState<OnboardingStep>(1);
   const [saving, setSaving] = useState(false);
 
-  const [weight, setWeight] = useState(auth.profile?.weight_kg ? String(auth.profile.weight_kg) : "");
-  const [height, setHeight] = useState(auth.profile?.height_cm ? String(auth.profile.height_cm) : "");
-  const [activityLevel, setActivityLevel] = useState<ActivityLevel>(auth.profile?.activity_level ?? "moderate");
-  const [goalType, setGoalType] = useState<GoalType>(auth.profile?.goal_type ?? "maintain");
+  const [weight, setWeight] = useState(
+    auth.profile?.weight_kg ? String(auth.profile.weight_kg) : webSignupDraft ? String(parseWizardCurrentWeightKg(webSignupDraft) ?? "") : "",
+  );
+  const [height, setHeight] = useState(
+    auth.profile?.height_cm ? String(auth.profile.height_cm) : webSignupDraft ? String(parseWizardHeightCm(webSignupDraft) ?? "") : "",
+  );
+  const [activityLevel, setActivityLevel] = useState<ActivityLevel>(auth.profile?.activity_level ?? webSignupDraft?.activityLevel ?? "moderate");
+  const [goalType, setGoalType] = useState<GoalType>(auth.profile?.goal_type ?? (webSignupDraft ? goalTypeFromPrimaryGoal(webSignupDraft.primaryGoal) : "maintain"));
 
   const [waist, setWaist] = useState(auth.profile?.waist_cm ? String(auth.profile.waist_cm) : "");
   const [neck, setNeck] = useState(auth.profile?.neck_cm ? String(auth.profile.neck_cm) : "");
@@ -8077,7 +9870,6 @@ function SettingsScreen({ isActive }: { isActive: boolean }) {
   const useDesktopLayout = isDesktopWebLayout(width);
   const useWideDesktopLayout = isWideDesktopWebLayout(width);
   const webMainScrollStyle = useMemo(() => webMainContentContainerStyle(width), [width]);
-  const { language, setLanguage } = useI18n();
   const today = formatDateLocal(new Date());
   const [apiDraft, setApiDraft] = useState(auth.apiBaseUrl);
   const [checking, setChecking] = useState(false);
@@ -8454,21 +10246,6 @@ function SettingsScreen({ isActive }: { isActive: boolean }) {
           <StatRow
             label="Sugerencia kcal"
             value={suggestedKcalAdjustment !== null ? `${suggestedKcalAdjustment >= 0 ? "+" : ""}${suggestedKcalAdjustment.toFixed(0)} kcal` : "N/D"}
-          />
-        </AppCard>
-
-        <AppCard style={useDesktopLayout ? [styles.desktopSectionGridItem, useWideDesktopLayout && styles.desktopSectionGridItemWide] : undefined}>
-          <SectionHeader title="Idioma" subtitle="Selecciona el idioma de la app" />
-          <ChoiceRow
-            label="Idioma"
-            value={language}
-            onChange={(nextLanguage) => {
-              void setLanguage(nextLanguage);
-            }}
-            options={[
-              { label: "Español", value: "es" },
-              { label: "English", value: "en" },
-            ]}
           />
         </AppCard>
 
@@ -13030,6 +14807,7 @@ function QuickAddCard(props: { action: QuickAddAction; title: string; subtitle: 
 function MainAppTabs() {
   const { width } = useWindowDimensions();
   const auth = useAuth();
+  const { language, setLanguage } = useI18n();
   const isWeb = Platform.OS === "web";
   const [tab, setTab] = useState<MainTab>("dashboard");
   const [visitedTabs, setVisitedTabs] = useState<Record<MainTab, boolean>>({
@@ -13478,19 +15256,44 @@ function MainAppTabs() {
             >
               <Text style={styles.webBrandText}>NutriTracker</Text>
             </Pressable>
-            <Pressable
-              hitSlop={10}
-              style={({ pressed }) => [styles.webProfileButton, pressed && styles.webProfileButtonPressed]}
-              onPress={toggleWebAccountMenu}
-            >
-              <View style={styles.webProfileAvatar}>
-                {auth.user?.avatar_url ? (
-                  <Image source={{ uri: auth.user.avatar_url }} style={styles.webProfileAvatarImage} />
-                ) : (
-                  <Text style={styles.webProfileAvatarText}>{webProfileInitial}</Text>
-                )}
+            <View style={styles.authWebTopControls}>
+              <View style={styles.authWebLanguageSwitch}>
+                {[
+                  { value: "es" as const, flag: "🇪🇸", label: "ES" },
+                  { value: "en" as const, flag: "🇬🇧", label: "EN" },
+                ].map((option) => (
+                  <Pressable
+                    key={option.value}
+                    onPress={() => {
+                      void setLanguage(option.value);
+                    }}
+                    style={({ pressed }) => [
+                      styles.authWebLanguageOption,
+                      language === option.value && styles.authWebLanguageOptionActive,
+                      pressed && styles.authWebLanguageOptionPressed,
+                    ]}
+                  >
+                    <Text style={styles.authWebLanguageFlag}>{option.flag}</Text>
+                    <Text style={[styles.authWebLanguageCode, language === option.value && styles.authWebLanguageCodeActive]}>
+                      {option.label}
+                    </Text>
+                  </Pressable>
+                ))}
               </View>
-            </Pressable>
+              <Pressable
+                hitSlop={10}
+                style={({ pressed }) => [styles.webProfileButton, pressed && styles.webProfileButtonPressed]}
+                onPress={toggleWebAccountMenu}
+              >
+                <View style={styles.webProfileAvatar}>
+                  {auth.user?.avatar_url ? (
+                    <Image source={{ uri: auth.user.avatar_url }} style={styles.webProfileAvatarImage} />
+                  ) : (
+                    <Text style={styles.webProfileAvatarText}>{webProfileInitial}</Text>
+                  )}
+                </View>
+              </Pressable>
+            </View>
           </View>
           <View style={styles.webNavBar}>
             <View style={styles.webNavTabsRow}>
@@ -14024,6 +15827,85 @@ const styles = StyleSheet.create({
     paddingHorizontal: Platform.OS === "web" ? 24 : 20,
     gap: 14,
   },
+  authScrollWebOffset: {
+    paddingTop: WEB_TOPBAR_HEIGHT + 28,
+  },
+  authWebTopShell: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 90,
+    backgroundColor: "#0d1016",
+    borderBottomWidth: 1,
+    borderBottomColor: theme.topbarBorder,
+  },
+  authWebTopBar: {
+    height: WEB_TOPBAR_HEIGHT,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 32,
+    width: "100%",
+    maxWidth: 1520,
+    alignSelf: "center",
+  },
+  authWebTopSpacer: {
+    width: 50,
+    height: 50,
+  },
+  authWebTopControls: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 16,
+  },
+  authWebLanguageSwitch: {
+    minHeight: 48,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: "#131821",
+    padding: 5,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    shadowColor: "#000000",
+    shadowOpacity: 0.14,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 8 },
+  },
+  authWebLanguageOption: {
+    minWidth: 72,
+    height: 36,
+    borderRadius: 999,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "transparent",
+    flexDirection: "row",
+    gap: 8,
+    paddingHorizontal: 10,
+  },
+  authWebLanguageOptionActive: {
+    backgroundColor: "#1c232d",
+    borderWidth: 1,
+    borderColor: "rgba(45,212,191,0.18)",
+  },
+  authWebLanguageOptionPressed: {
+    opacity: 0.9,
+    transform: [{ scale: 0.98 }],
+  },
+  authWebLanguageFlag: {
+    fontSize: 16,
+  },
+  authWebLanguageCode: {
+    color: theme.muted,
+    fontSize: 12,
+    fontWeight: "800",
+    letterSpacing: 0.4,
+  },
+  authWebLanguageCodeActive: {
+    color: theme.text,
+  },
   brandCard: {
     borderRadius: 28,
     padding: 24,
@@ -14128,83 +16010,84 @@ const styles = StyleSheet.create({
   birthDateCard: {
     borderWidth: 1,
     borderColor: theme.border,
-    borderRadius: 22,
-    padding: 18,
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 13,
     backgroundColor: theme.panel,
-    gap: 14,
+    gap: 10,
   },
   birthDateCardHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-start",
-    gap: 12,
+    gap: 10,
   },
   birthDateCardTitle: {
     color: theme.text,
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: "700",
   },
   birthDateCardSubtitle: {
     color: theme.muted,
-    fontSize: 12,
-    lineHeight: 18,
-    marginTop: 4,
-    maxWidth: 360,
+    fontSize: 11,
+    lineHeight: 16,
+    marginTop: 3,
+    maxWidth: 320,
   },
   birthDateAgePill: {
     borderWidth: 1,
     borderColor: "rgba(45,212,191,0.28)",
     backgroundColor: "rgba(45,212,191,0.12)",
     borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
     alignItems: "center",
-    minWidth: 62,
+    minWidth: 54,
   },
   birthDateAgeValue: {
     color: theme.accent,
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: "800",
   },
   birthDateAgeLabel: {
     color: theme.muted,
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: "600",
   },
   birthDateSegmentRow: {
     flexDirection: "row",
-    gap: 12,
+    gap: 10,
     flexWrap: "wrap",
   },
   birthDateSegmentCard: {
     borderWidth: 1,
     borderColor: theme.inputBorder,
-    borderRadius: 18,
+    borderRadius: 14,
     backgroundColor: theme.inputBg,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 4,
   },
   birthDateSegmentCardSmall: {
-    minWidth: 92,
-    flexGrow: 1,
+    minWidth: 82,
+    flexGrow: 0.9,
   },
   birthDateSegmentCardLarge: {
-    minWidth: 122,
-    flexGrow: 1.3,
+    minWidth: 110,
+    flexGrow: 1.1,
   },
   birthDateSegmentLabel: {
     color: theme.muted,
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: "700",
     textTransform: "uppercase",
-    letterSpacing: 0.6,
+    letterSpacing: 0.5,
   },
   birthDateSegmentInput: {
     color: theme.text,
-    fontSize: 24,
+    fontSize: 20,
     fontWeight: "700",
-    paddingVertical: 2,
+    paddingVertical: 0,
   },
   googleAuthCard: {
     borderWidth: 1,
@@ -14231,6 +16114,1112 @@ const styles = StyleSheet.create({
     minHeight: 42,
     alignItems: "center",
     justifyContent: "center",
+  },
+  googleAuthInlineWrap: {
+    gap: 10,
+  },
+  googleAuthInlineMissing: {
+    borderWidth: 1,
+    borderColor: "rgba(251,191,36,0.24)",
+    borderRadius: 16,
+    backgroundColor: "rgba(251,191,36,0.08)",
+    padding: 14,
+    gap: 6,
+  },
+  googleAuthInlineMissingTitle: {
+    color: "#fbbf24",
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  googleAuthInlineMissingText: {
+    color: theme.muted,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  googleAuthInlineHelper: {
+    color: theme.muted,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  googleAuthButtonHostInline: {
+    minHeight: 42,
+    alignItems: "flex-start",
+    justifyContent: "center",
+  },
+  webLandingScreen: {
+    flex: 1,
+    backgroundColor: theme.bg,
+  },
+  webLandingScroll: {
+    flexGrow: 1,
+    paddingTop: WEB_TOPBAR_HEIGHT + 42,
+    paddingBottom: 72,
+    paddingHorizontal: 34,
+    gap: 52,
+  },
+  webLandingHeroSection: {
+    position: "relative",
+    width: "100%",
+    maxWidth: 1500,
+    alignSelf: "center",
+    gap: 24,
+  },
+  webLandingHeroSectionDesktop: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 48,
+  },
+  webLandingHeroAmbientLeft: {
+    position: "absolute",
+    width: 520,
+    height: 160,
+    borderRadius: 56,
+    top: -14,
+    left: -120,
+    backgroundColor: "rgba(45,212,191,0.06)",
+    borderWidth: 1,
+    borderColor: "rgba(45,212,191,0.08)",
+    transform: [{ rotate: "-12deg" }],
+  },
+  webLandingHeroAmbientRight: {
+    position: "absolute",
+    width: 620,
+    height: 190,
+    borderRadius: 64,
+    right: -160,
+    top: 84,
+    backgroundColor: "rgba(96,165,250,0.06)",
+    borderWidth: 1,
+    borderColor: "rgba(96,165,250,0.08)",
+    transform: [{ rotate: "14deg" }],
+  },
+  webLandingHeroCopy: {
+    flex: 1.08,
+    borderRadius: 38,
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: "#11131a",
+    paddingHorizontal: 42,
+    paddingVertical: 44,
+    gap: 20,
+    shadowColor: "#000000",
+    shadowOpacity: 0.26,
+    shadowRadius: 36,
+    shadowOffset: { width: 0, height: 24 },
+  },
+  webLandingHeroPreview: {
+    flex: 0.95,
+    minHeight: 580,
+    justifyContent: "center",
+  },
+  webLandingEyebrow: {
+    color: theme.accent,
+    fontSize: 12,
+    fontWeight: "800",
+    letterSpacing: 1.8,
+    textTransform: "uppercase",
+  },
+  webLandingHeroTitle: {
+    color: theme.text,
+    fontSize: 60,
+    lineHeight: 66,
+    fontWeight: "800",
+    maxWidth: 760,
+  },
+  webLandingHeroSubtitle: {
+    color: "#b5bac3",
+    fontSize: 19,
+    lineHeight: 30,
+    maxWidth: 680,
+  },
+  webLandingHeroActions: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 14,
+    paddingTop: 4,
+  },
+  webLandingPrimaryCta: {
+    minWidth: 176,
+  },
+  webLandingSecondaryCta: {
+    minWidth: 176,
+  },
+  webLandingHeroSignalRow: {
+    gap: 12,
+    paddingTop: 12,
+  },
+  webLandingHeroSignalRowDesktop: {
+    flexDirection: "row",
+  },
+  webLandingHeroSignalCard: {
+    flex: 1,
+    minWidth: 164,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: "#151922",
+    paddingHorizontal: 18,
+    paddingVertical: 15,
+    gap: 7,
+  },
+  webLandingHeroSignalLine: {
+    width: 42,
+    height: 4,
+    borderRadius: 999,
+  },
+  webLandingHeroSignalLabel: {
+    color: theme.muted,
+    fontSize: 11,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+  },
+  webLandingHeroSignalValue: {
+    color: theme.text,
+    fontSize: 14,
+    lineHeight: 20,
+    fontWeight: "700",
+  },
+  webLandingMockupStage: {
+    minHeight: 580,
+    position: "relative",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  webLandingMockupGlow: {
+    position: "absolute",
+    width: "84%",
+    height: "78%",
+    borderRadius: 72,
+    backgroundColor: "rgba(45,212,191,0.12)",
+    transform: [{ scale: 1.12 }],
+    shadowColor: theme.accent,
+    shadowOpacity: 0.3,
+    shadowRadius: 56,
+    shadowOffset: { width: 0, height: 0 },
+  },
+  webLandingMockupPrimary: {
+    width: "100%",
+    maxWidth: 640,
+    borderRadius: 34,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+    backgroundColor: "#10141b",
+    paddingHorizontal: 30,
+    paddingVertical: 30,
+    gap: 18,
+    shadowColor: "#000000",
+    shadowOpacity: 0.3,
+    shadowRadius: 40,
+    shadowOffset: { width: 0, height: 26 },
+  },
+  webLandingMockupHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: 16,
+  },
+  webLandingMockupHeaderCopy: {
+    gap: 4,
+    flex: 1,
+  },
+  webLandingMockupEyebrow: {
+    color: theme.muted,
+    fontSize: 10,
+    fontWeight: "800",
+    letterSpacing: 1.2,
+    textTransform: "uppercase",
+  },
+  webLandingMockupTitle: {
+    color: theme.text,
+    fontSize: 22,
+    lineHeight: 28,
+    fontWeight: "800",
+  },
+  webLandingMockupStatusPill: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "rgba(45,212,191,0.22)",
+    backgroundColor: "rgba(45,212,191,0.1)",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  webLandingMockupStatusText: {
+    color: theme.accent,
+    fontSize: 11,
+    fontWeight: "800",
+    letterSpacing: 0.3,
+  },
+  webLandingMockupHeroMetric: {
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+    backgroundColor: "#151a22",
+    paddingHorizontal: 18,
+    paddingVertical: 16,
+    gap: 10,
+  },
+  webLandingMockupHeroMetricValue: {
+    color: theme.text,
+    fontSize: 48,
+    lineHeight: 52,
+    fontWeight: "800",
+  },
+  webLandingMockupHeroMetricLabel: {
+    color: theme.muted,
+    fontSize: 13,
+    lineHeight: 20,
+  },
+  webLandingMockupMacroGrid: {
+    flexDirection: "row",
+    gap: 12,
+  },
+  webLandingMockupMacroCard: {
+    flex: 1,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+    backgroundColor: "#12171f",
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    gap: 6,
+  },
+  webLandingMockupMacroDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 999,
+  },
+  webLandingMockupMacroLabel: {
+    color: theme.muted,
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  webLandingMockupMacroValue: {
+    color: theme.text,
+    fontSize: 16,
+    fontWeight: "800",
+  },
+  webLandingMockupList: {
+    gap: 12,
+  },
+  webLandingMockupListRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.06)",
+    backgroundColor: "#12171e",
+    paddingHorizontal: 15,
+    paddingVertical: 13,
+  },
+  webLandingMockupListAccent: {
+    width: 8,
+    height: 8,
+    borderRadius: 999,
+  },
+  webLandingMockupListText: {
+    flex: 1,
+    color: theme.text,
+    fontSize: 13,
+    lineHeight: 19,
+    fontWeight: "600",
+  },
+  webLandingMockupSecondary: {
+    position: "absolute",
+    right: 8,
+    top: 18,
+    width: 220,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+    backgroundColor: "#141922",
+    paddingHorizontal: 16,
+    paddingVertical: 15,
+    gap: 8,
+    shadowColor: "#000000",
+    shadowOpacity: 0.22,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 12 },
+  },
+  webLandingMockupTertiary: {
+    position: "absolute",
+    left: 8,
+    bottom: 12,
+    width: 220,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+    backgroundColor: "#17131c",
+    paddingHorizontal: 16,
+    paddingVertical: 15,
+    gap: 8,
+    shadowColor: "#000000",
+    shadowOpacity: 0.22,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 12 },
+  },
+  webLandingMockupMiniEyebrow: {
+    color: theme.muted,
+    fontSize: 10,
+    fontWeight: "800",
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+  },
+  webLandingMockupMiniTitle: {
+    color: theme.text,
+    fontSize: 18,
+    fontWeight: "800",
+    lineHeight: 23,
+  },
+  webLandingMockupMiniText: {
+    color: "#aeb4bf",
+    fontSize: 12,
+    lineHeight: 19,
+  },
+  webLandingMockupRecommendation: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginTop: 2,
+  },
+  webLandingMockupRecommendationStar: {
+    color: "#facc15",
+    fontSize: 15,
+    fontWeight: "900",
+  },
+  webLandingMockupRecommendationText: {
+    flex: 1,
+    color: theme.text,
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: "700",
+  },
+  webLandingSection: {
+    width: "100%",
+    maxWidth: 1500,
+    alignSelf: "center",
+    gap: 22,
+  },
+  webLandingSectionHeader: {
+    gap: 10,
+    maxWidth: 820,
+  },
+  webLandingSectionTitle: {
+    color: theme.text,
+    fontSize: 34,
+    lineHeight: 40,
+    fontWeight: "800",
+  },
+  webLandingSectionSubtitle: {
+    color: "#aeb4bf",
+    fontSize: 15,
+    lineHeight: 24,
+  },
+  webLandingValueLayout: {
+    gap: 18,
+  },
+  webLandingValueLayoutDesktop: {
+    flexDirection: "row",
+    alignItems: "stretch",
+    gap: 28,
+  },
+  webLandingValueLead: {
+    flex: 1.15,
+    borderRadius: 32,
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: "#11151c",
+    paddingHorizontal: 28,
+    paddingVertical: 28,
+    gap: 18,
+  },
+  webLandingValueLeadAccent: {
+    width: 68,
+    height: 5,
+    borderRadius: 999,
+    backgroundColor: theme.accent,
+  },
+  webLandingValueLeadTitle: {
+    color: theme.text,
+    fontSize: 24,
+    lineHeight: 30,
+    fontWeight: "800",
+    maxWidth: 520,
+  },
+  webLandingValueLeadText: {
+    color: "#aeb4bf",
+    fontSize: 14,
+    lineHeight: 23,
+    maxWidth: 620,
+  },
+  webLandingValueBullets: {
+    gap: 12,
+    paddingTop: 2,
+  },
+  webLandingValueBullet: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 12,
+  },
+  webLandingValueBulletDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 999,
+    marginTop: 6,
+  },
+  webLandingValueBulletCopy: {
+    flex: 1,
+    gap: 4,
+  },
+  webLandingValueBulletTitle: {
+    color: theme.text,
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  webLandingValueBulletText: {
+    color: "#aeb4bf",
+    fontSize: 13,
+    lineHeight: 20,
+  },
+  webLandingFeatureRail: {
+    flex: 0.92,
+    gap: 14,
+    justifyContent: "space-between",
+  },
+  webLandingFeatureCard: {
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: theme.panel,
+    paddingHorizontal: 20,
+    paddingVertical: 18,
+    gap: 10,
+    shadowColor: "#000000",
+    shadowOpacity: 0.12,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 10 },
+    minHeight: 132,
+  },
+  webLandingFeatureAccent: {
+    width: 44,
+    height: 4,
+    borderRadius: 999,
+  },
+  webLandingFeatureTitle: {
+    color: theme.text,
+    fontSize: 17,
+    lineHeight: 23,
+    fontWeight: "800",
+  },
+  webLandingFeatureText: {
+    color: "#aeb4bf",
+    fontSize: 13,
+    lineHeight: 21,
+  },
+  webLandingFeatureSummary: {
+    paddingTop: 8,
+    gap: 8,
+  },
+  webLandingFeatureSummaryTitle: {
+    color: theme.text,
+    fontSize: 21,
+    lineHeight: 27,
+    fontWeight: "800",
+  },
+  webLandingFeatureSummaryText: {
+    color: "#aeb4bf",
+    fontSize: 14,
+    lineHeight: 23,
+  },
+  webLandingTimeline: {
+    gap: 18,
+    position: "relative",
+  },
+  webLandingTimelineDesktop: {
+    flexDirection: "row",
+    alignItems: "stretch",
+    gap: 18,
+    paddingTop: 18,
+  },
+  webLandingTimelineStep: {
+    flex: 1,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: "#11151c",
+    paddingHorizontal: 20,
+    paddingVertical: 20,
+    gap: 12,
+  },
+  webLandingTimelineStepDesktop: {
+    borderWidth: 0,
+    backgroundColor: "transparent",
+    paddingHorizontal: 0,
+    paddingVertical: 0,
+    paddingRight: 0,
+    gap: 16,
+  },
+  webLandingTimelineHead: {
+    flexDirection: "row",
+    alignItems: "center",
+    width: "100%",
+    gap: 0,
+  },
+  webLandingTimelineConnector: {
+    flex: 1,
+    height: 2,
+    backgroundColor: "#1c242f",
+    marginLeft: 12,
+    borderRadius: 999,
+  },
+  webLandingTimelineBody: {
+    gap: 8,
+  },
+  webLandingTimelineNode: {
+    width: 54,
+    height: 54,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "rgba(45,212,191,0.38)",
+    backgroundColor: "#121a1d",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: theme.accent,
+    shadowOpacity: 0.22,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 8 },
+  },
+  webLandingTimelineNodeText: {
+    color: theme.accent,
+    fontSize: 17,
+    fontWeight: "800",
+    letterSpacing: 0.4,
+  },
+  webLandingTimelineTitle: {
+    color: theme.text,
+    fontSize: 21,
+    fontWeight: "800",
+  },
+  webLandingTimelineText: {
+    color: "#b2b7c1",
+    fontSize: 15,
+    lineHeight: 24,
+  },
+  webLandingFinalSection: {
+    position: "relative",
+    width: "100%",
+    maxWidth: 1500,
+    alignSelf: "center",
+    borderRadius: 40,
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: "#10141b",
+    paddingHorizontal: 34,
+    paddingVertical: 34,
+    marginTop: 6,
+    overflow: "hidden",
+  },
+  webLandingFinalGlow: {
+    position: "absolute",
+    width: 420,
+    height: 420,
+    borderRadius: 999,
+    top: -120,
+    right: -80,
+    backgroundColor: "rgba(45,212,191,0.12)",
+  },
+  webLandingFinalInner: {
+    gap: 18,
+  },
+  webLandingFinalInnerDesktop: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 36,
+  },
+  webLandingFinalCopy: {
+    flex: 1,
+    gap: 10,
+    maxWidth: 760,
+  },
+  webLandingFinalTitle: {
+    color: theme.text,
+    fontSize: 42,
+    lineHeight: 48,
+    fontWeight: "800",
+  },
+  webLandingFinalSubtitle: {
+    color: "#b2b7c1",
+    fontSize: 16,
+    lineHeight: 25,
+  },
+  webLandingFinalActions: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 12,
+    marginTop: 4,
+    alignItems: "center",
+  },
+  webLandingFinalActionsDesktop: {
+    justifyContent: "flex-end",
+    minWidth: 320,
+  },
+  webLandingFinalPrimaryCta: {
+    minWidth: 196,
+    minHeight: 54,
+  },
+  webLandingFinalSecondaryCta: {
+    minWidth: 152,
+  },
+  webOnboardingScreen: {
+    flex: 1,
+    backgroundColor: theme.bg,
+  },
+  webOnboardingScroll: {
+    flexGrow: 1,
+    justifyContent: "center",
+    paddingHorizontal: 24,
+    paddingTop: WEB_TOPBAR_HEIGHT + 28,
+    paddingBottom: 42,
+    gap: 22,
+  },
+  webOnboardingCenterWrap: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 24,
+    paddingTop: WEB_TOPBAR_HEIGHT + 28,
+    paddingBottom: 24,
+  },
+  webOnboardingBrandBlock: {
+    width: "100%",
+    maxWidth: 620,
+    alignSelf: "center",
+    gap: 10,
+  },
+  webOnboardingBrandEyebrow: {
+    color: theme.accent,
+    fontSize: 12,
+    fontWeight: "800",
+    letterSpacing: 1.5,
+  },
+  webOnboardingBrandTitle: {
+    color: theme.text,
+    fontSize: 34,
+    lineHeight: 40,
+    fontWeight: "800",
+  },
+  webOnboardingBrandSubtitle: {
+    color: theme.muted,
+    fontSize: 15,
+    lineHeight: 23,
+    maxWidth: 560,
+  },
+  webOnboardingCard: {
+    width: "100%",
+    maxWidth: 620,
+    alignSelf: "center",
+    backgroundColor: theme.panel,
+    borderRadius: 28,
+    paddingHorizontal: 28,
+    paddingVertical: 26,
+    borderWidth: 1,
+    borderColor: theme.border,
+    shadowColor: "#000000",
+    shadowOpacity: 0.22,
+    shadowRadius: 28,
+    shadowOffset: { width: 0, height: 18 },
+    elevation: 6,
+    gap: 20,
+  },
+  webAuthCardCompact: {
+    maxWidth: 560,
+  },
+  webAuthHeader: {
+    gap: 8,
+  },
+  webAuthCardTitle: {
+    color: theme.text,
+    fontSize: 30,
+    lineHeight: 36,
+    fontWeight: "800",
+  },
+  webAuthCardSubtitle: {
+    color: theme.muted,
+    fontSize: 14,
+    lineHeight: 21,
+  },
+  webAuthErrorCard: {
+    borderWidth: 1,
+    borderColor: "rgba(248, 113, 113, 0.28)",
+    borderRadius: 14,
+    backgroundColor: "rgba(248, 113, 113, 0.08)",
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  webAuthErrorText: {
+    color: "#fda4a4",
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  webAuthLinkRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingTop: 2,
+  },
+  webAuthLinkLabel: {
+    color: theme.muted,
+    fontSize: 13,
+  },
+  webAuthLinkAction: {
+    paddingVertical: 4,
+  },
+  webAuthLinkActionPressed: {
+    opacity: 0.82,
+  },
+  webAuthLinkActionText: {
+    color: theme.accent,
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  webOnboardingFinalizeCard: {
+    maxWidth: 560,
+    alignItems: "center",
+  },
+  webWizardProgressWrap: {
+    marginBottom: 2,
+  },
+  webWizardProgressTrack: {
+    height: 7,
+    borderRadius: 999,
+    backgroundColor: theme.panelMuted,
+    overflow: "hidden",
+  },
+  webWizardProgressFill: {
+    height: "100%",
+    borderRadius: 999,
+    backgroundColor: theme.accent,
+  },
+  webOnboardingStepShell: {
+    position: "relative",
+    minHeight: Platform.OS === "web" ? 470 : 0,
+    overflow: "hidden",
+  },
+  webOnboardingStepPane: {
+    width: "100%",
+  },
+  webOnboardingStepPaneOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+  },
+  webOnboardingStepPaneContent: {
+    gap: 18,
+  },
+  webOnboardingStepTitle: {
+    color: theme.text,
+    fontSize: 28,
+    lineHeight: 34,
+    fontWeight: "800",
+  },
+  webOnboardingStepSubtitle: {
+    color: theme.muted,
+    fontSize: 14,
+    lineHeight: 22,
+    marginTop: -4,
+  },
+  webOnboardingStepBody: {
+    gap: 16,
+  },
+  webOnboardingFooter: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    marginTop: 6,
+  },
+  webOnboardingSecondaryBtn: {
+    minHeight: 52,
+    justifyContent: "center",
+    minWidth: 132,
+    backgroundColor: theme.secondaryButtonBg,
+    borderColor: theme.secondaryButtonBorder,
+  },
+  webOnboardingSecondaryBtnText: {
+    color: theme.text,
+  },
+  webOnboardingPrimaryBtn: {
+    flex: 1,
+    minHeight: 52,
+    justifyContent: "center",
+  },
+  webWizardSectionStack: {
+    gap: 16,
+  },
+  webWizardFieldSection: {
+    gap: 10,
+  },
+  webWizardFieldSectionHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 12,
+    flexWrap: "wrap",
+  },
+  webWizardSectionLabel: {
+    color: theme.text,
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  webWizardSectionHelper: {
+    color: theme.muted,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  webWizardFieldCompact: {
+    gap: 6,
+  },
+  webWizardFieldLabel: {
+    color: theme.muted,
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  webWizardFieldInput: {
+    borderColor: theme.inputBorder,
+    backgroundColor: theme.inputBg,
+    color: theme.text,
+    minHeight: 52,
+    fontSize: 16,
+    paddingHorizontal: 16,
+  },
+  webWizardInlineNote: {
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 16,
+    backgroundColor: theme.panelSoft,
+    borderWidth: 1,
+    borderColor: theme.border,
+  },
+  webWizardInlineNoteText: {
+    color: theme.muted,
+    fontSize: 13,
+    lineHeight: 20,
+  },
+  webWizardOptionGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 12,
+  },
+  webWizardOptionColumn: {
+    gap: 12,
+  },
+  webWizardOptionCard: {
+    width: "100%",
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: theme.panelSoft,
+    paddingHorizontal: 18,
+    paddingVertical: 16,
+    gap: 8,
+  },
+  webWizardOptionCardActive: {
+    borderColor: "rgba(45,212,191,0.5)",
+    backgroundColor: theme.accentSoft,
+    shadowColor: "#000000",
+    shadowOpacity: 0.18,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 8 },
+  },
+  webWizardOptionCardHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 10,
+  },
+  webWizardOptionCardTitle: {
+    color: theme.text,
+    fontSize: 16,
+    fontWeight: "700",
+    flex: 1,
+  },
+  webWizardOptionCardTitleActive: {
+    color: theme.text,
+  },
+  webWizardOptionCardSubtitle: {
+    color: theme.muted,
+    fontSize: 13,
+    lineHeight: 20,
+  },
+  webWizardOptionCardSubtitleActive: {
+    color: theme.text,
+  },
+  webWizardOptionCardRecommended: {
+    color: theme.accent,
+    fontSize: 11,
+    fontWeight: "800",
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+  },
+  webWizardChipRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+  },
+  webWizardChoiceChip: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: theme.panelSoft,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  webWizardChoiceChipActive: {
+    borderColor: "rgba(45,212,191,0.55)",
+    backgroundColor: theme.accentSoft,
+  },
+  webWizardChoiceChipText: {
+    color: theme.muted,
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  webWizardChoiceChipTextActive: {
+    color: theme.text,
+  },
+  webWizardBirthRow: {
+    flexDirection: "row",
+    gap: 10,
+    flexWrap: "wrap",
+  },
+  webWizardBirthCell: {
+    borderWidth: 1,
+    borderColor: theme.inputBorder,
+    borderRadius: 16,
+    backgroundColor: theme.inputBg,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    gap: 4,
+  },
+  webWizardBirthCellSmall: {
+    minWidth: 86,
+    flexGrow: 0.8,
+  },
+  webWizardBirthCellLarge: {
+    minWidth: 118,
+    flexGrow: 1.1,
+  },
+  webWizardBirthLabel: {
+    color: theme.muted,
+    fontSize: 10,
+    fontWeight: "800",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  webWizardBirthInput: {
+    color: theme.text,
+    fontSize: 18,
+    fontWeight: "700",
+    paddingVertical: 2,
+  },
+  webWizardAgePill: {
+    borderRadius: 999,
+    backgroundColor: "rgba(45,212,191,0.12)",
+    borderWidth: 1,
+    borderColor: "rgba(45,212,191,0.18)",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  webWizardAgePillText: {
+    color: theme.accent,
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  webWizardMetricGrid: {
+    gap: 12,
+  },
+  webWizardImperialHeightRow: {
+    flexDirection: "row",
+    gap: 12,
+  },
+  webWizardSummaryStrip: {
+    flexDirection: "row",
+    gap: 12,
+  },
+  webWizardSummaryMetric: {
+    flex: 1,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: theme.panelSoft,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    gap: 6,
+  },
+  webWizardSummaryMetricLabel: {
+    color: theme.muted,
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  webWizardSummaryMetricValue: {
+    color: theme.text,
+    fontSize: 20,
+    fontWeight: "800",
+  },
+  webWizardCheckboxRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+  },
+  webWizardCheckboxBox: {
+    width: 22,
+    height: 22,
+    borderRadius: 7,
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: theme.panelSoft,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 1,
+  },
+  webWizardCheckboxBoxChecked: {
+    borderColor: theme.accent,
+    backgroundColor: theme.accent,
+  },
+  webWizardCheckboxTick: {
+    color: "#ffffff",
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  webWizardCheckboxLabel: {
+    flex: 1,
+    color: theme.muted,
+    fontSize: 13,
+    lineHeight: 20,
+  },
+  webWizardDividerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    marginVertical: 4,
+  },
+  webWizardDividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: theme.border,
+  },
+  webWizardDividerText: {
+    color: theme.muted,
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  webOnboardingErrorText: {
+    color: theme.danger,
+    fontSize: 13,
+    lineHeight: 20,
+    textAlign: "center",
   },
   passwordStrengthWrap: {
     gap: 8,
@@ -15336,7 +18325,9 @@ const styles = StyleSheet.create({
     borderBottomColor: theme.topbarBorder,
   },
   webBrandButton: {
-    paddingVertical: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 12,
     paddingHorizontal: 2,
   },
   webBrandButtonPressed: {
@@ -15344,9 +18335,11 @@ const styles = StyleSheet.create({
   },
   webBrandText: {
     color: theme.text,
-    fontSize: 24,
+    fontSize: 26,
     fontWeight: "800",
-    letterSpacing: 0.45,
+    letterSpacing: 0.15,
+    textShadowColor: "rgba(255,255,255,0.06)",
+    textShadowRadius: 10,
   },
   webProfileButton: {
     width: 50,
@@ -15445,6 +18438,56 @@ const styles = StyleSheet.create({
   webAccountMenuContainer: {
     width: "100%",
     maxWidth: 380,
+  },
+  authWebMenuLayer: {
+    ...StyleSheet.absoluteFillObject,
+    paddingTop: WEB_TOPBAR_HEIGHT + 12,
+    paddingHorizontal: 24,
+    alignItems: "flex-end",
+    zIndex: 95,
+  },
+  authWebMenuContainer: {
+    width: 240,
+  },
+  authWebMenuCard: {
+    borderWidth: 1,
+    borderColor: theme.border,
+    borderRadius: 20,
+    backgroundColor: "#12161d",
+    padding: 14,
+    gap: 12,
+    shadowColor: "#000000",
+    shadowOpacity: 0.24,
+    shadowRadius: 22,
+    shadowOffset: { width: 0, height: 14 },
+  },
+  authWebAccountMenuActions: {
+    gap: 10,
+  },
+  authWebAccountMenuButton: {
+    minHeight: 48,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: theme.inputBg,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 16,
+  },
+  authWebAccountMenuButtonPrimary: {
+    backgroundColor: theme.text,
+    borderColor: theme.text,
+  },
+  authWebAccountMenuButtonPressed: {
+    opacity: 0.92,
+  },
+  authWebAccountMenuButtonText: {
+    color: theme.text,
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  authWebAccountMenuButtonTextPrimary: {
+    color: theme.bg,
   },
   bodyActionMenuContainerWeb: {
     width: "100%",

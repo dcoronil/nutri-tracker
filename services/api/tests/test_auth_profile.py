@@ -233,3 +233,39 @@ def test_google_auth_requires_birth_date_for_new_user(client, monkeypatch):
     )
     assert response.status_code == 422
     assert "fecha de nacimiento" in response.json()["detail"].lower()
+
+
+def test_login_accepts_username_or_email(client):
+    username = f"loginuser_{uuid4().hex[:8]}"
+    email = f"{username}@example.com"
+
+    register_response = client.post(
+        "/auth/register",
+        json={
+            "username": username,
+            "email": email,
+            "password": "supersecret123",
+            "sex": "male",
+            "birth_date": "1994-05-09",
+        },
+    )
+    assert register_response.status_code == 200
+
+    verify_response = client.post(
+        "/auth/verify",
+        json={"email": email, "code": register_response.json()["debug_verification_code"]},
+    )
+    assert verify_response.status_code == 200
+
+    login_by_email = client.post(
+        "/auth/login",
+        json={"email": email, "password": "supersecret123"},
+    )
+    assert login_by_email.status_code == 200
+
+    login_by_username = client.post(
+        "/auth/login",
+        json={"email": username, "password": "supersecret123"},
+    )
+    assert login_by_username.status_code == 200
+    assert login_by_username.json()["user"]["username"] == username

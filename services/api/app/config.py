@@ -1,6 +1,10 @@
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
 class Settings(BaseSettings):
@@ -47,7 +51,7 @@ class Settings(BaseSettings):
     ai_key_test_timeout_seconds: float = 8.0
     meal_analysis_ttl_minutes: int = 30
     meal_analysis_storage_dir: str = "/tmp/nutri-tracker/meal-analysis"
-    social_media_storage_dir: str = "/tmp/nutri-tracker/social-media"
+    social_media_storage_dir: str = str(PROJECT_ROOT / ".data" / "social-media")
 
 
 @lru_cache

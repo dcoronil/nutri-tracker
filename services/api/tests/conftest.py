@@ -8,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session, SQLModel, create_engine, select
 
+from app.config import get_settings
 from app.database import get_session
 from app.main import create_app
 from app.models import PendingRegistration
@@ -20,6 +21,15 @@ def engine(tmp_path):
     engine = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
     SQLModel.metadata.create_all(engine)
     return engine
+
+
+@pytest.fixture(autouse=True)
+def media_storage_env(tmp_path, monkeypatch):
+    monkeypatch.setenv("SOCIAL_MEDIA_STORAGE_DIR", str(tmp_path / "social-media"))
+    monkeypatch.setenv("MEAL_ANALYSIS_STORAGE_DIR", str(tmp_path / "meal-analysis"))
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
 
 
 @pytest.fixture

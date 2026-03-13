@@ -218,6 +218,92 @@ export const enTranslations: Record<string, string> = {
   "M33.87,92.58c-4.86-12.55-4.19-32.82,9.42-39.93c0.1,23.3,23.05,26.27,18.8,51.14c3.92-4.44,5.9-11.54,6.25-17.15c6.22,14.24,1.34,25.63-7.53,31.43c-26.97,17.64-50.19-18.12-34.75-37.72C26.53,84.73,31.89,91.49,33.87,92.58L33.87,92.58z": "M33.87,92.58c-4.86-12.55-4.19-32.82,9.42-39.93c0.1,23.3,23.05,26.27,18.8,51.14c3.92-4.44,5.9-11.54,6.25-17.15c6.22 L33.87,92.58z",
   "Macros del día": "Macros of the day",
   "Mantener": "Keep",
+  "Registrarte": "Sign up",
+  "Accede a NutriTracker": "Access NutriTracker",
+  "Nutrición y progreso sin ruido": "Nutrition and progress without noise",
+  "Nutrición clara, seguimiento real y IA útil.": "Clear nutrition, real progress and useful AI.",
+  "Escanea productos, registra comidas y usa IA para entender mejor lo que comes y cómo progresas.":
+    "Scan products, log meals and use AI to better understand what you eat and how you progress.",
+  "Empezar": "Get started",
+  "Lo diferencial de NutriTracker": "What sets NutriTracker apart",
+  "Escaneo inteligente de productos y etiquetas": "Smart product and label scanning",
+  "Detecta productos, revisa etiquetas y completa datos nutricionales con menos fricción.":
+    "Detect products, review labels and complete nutrition data with less friction.",
+  "IA para fotos de comidas": "AI for meal photos",
+  "Combina imagen y preguntas cortas para conseguir estimaciones más útiles que una foto sin contexto.":
+    "Combine images with short questions to get estimates that are more useful than a photo without context.",
+  "La IA añade preguntas cortas cuando la foto sola no basta para afinar porciones y macros.":
+    "AI adds short follow-up questions when the photo alone is not enough to refine portions and macros.",
+  "Macros y seguimiento corporal": "Macros and body tracking",
+  "Une calorías, macros, peso y medidas en el mismo flujo para ver progreso real.":
+    "Bring calories, macros, weight and measurements into the same flow to see real progress.",
+  "Recetas adaptadas a tu objetivo": "Recipes tailored to your goal",
+  "Genera recetas y elige la opción que mejor encaja con lo que ya llevas consumido.":
+    "Generate recipes and choose the option that best fits what you have already eaten today.",
+  "Genera opciones según tus ingredientes, tu objetivo y lo que te queda hoy.":
+    "Generate options based on your ingredients, your goal and what you still need today.",
+  "IA para fotos de comidas y etiquetas": "AI for meal and label photos",
+  "Seguimiento de macros, peso y medidas": "Tracking for macros, weight and measurements",
+  "Recetas y decisiones guiadas por tu objetivo diario": "Recipes and decisions guided by your daily target",
+  "Todo lo importante en un mismo flujo": "Everything important in one flow",
+  "Desde el escaneo hasta el seguimiento corporal, con una capa de IA pensada para mejorar precisión y contexto.":
+    "From scanning to body tracking, with an AI layer built to improve precision and context.",
+  "Cómo funciona": "How it works",
+  "Una secuencia simple para registrar mejor, entender más y ajustar antes de perder el control del día.":
+    "A simple sequence to log better, understand more and adjust before the day gets away from you.",
+  "Escanea o registra": "Scan or log",
+  "Busca productos, usa código de barras o registra manualmente sin perder tiempo.":
+    "Search products, use barcodes or log manually without wasting time.",
+  "Obtén datos más precisos con IA": "Get more accurate data with AI",
+  "Analiza fotos de comidas y etiquetas para refinar macros, porciones y calidad del dato.":
+    "Analyze meal and label photos to refine macros, portions and data quality.",
+  "Sigue tu progreso y ajusta objetivos": "Track your progress and adjust goals",
+  "Consulta panel, cuerpo e historial para corregir el rumbo antes de desviarte.":
+    "Use dashboard, body and history to correct your course before you drift.",
+  "Empieza a registrar mejor desde hoy": "Start tracking better today",
+  "Crea tu cuenta para tener objetivos diarios, seguimiento corporal y herramientas de IA dentro del mismo sistema.":
+    "Create your account to get daily goals, body tracking and AI tools inside the same system.",
+  "Vista diaria": "Daily overview",
+  "Kcal / P / C / G": "Kcal / P / C / F",
+  "Escaneo inteligente": "Smart scanning",
+  "Escaneo + IA": "Scanning + AI",
+  "Producto, etiqueta o foto": "Product, label or photo",
+  "Foto + contexto": "Photo + context",
+  "La IA pregunta cuando la imagen no basta": "AI asks when the image is not enough",
+  "Ingredientes -> receta": "Ingredients -> recipe",
+  "Opciones según lo que te falta hoy": "Options based on what you still need today",
+  "Receta recomendada": "Recommended recipe",
+  "Encaja con tu día en curso": "Fits your day so far",
+  "En línea con tu objetivo": "On track with your goal",
+  "kcal consumidas hoy": "kcal eaten today",
+  "Seguimiento de macros y progreso corporal": "Macros and body progress tracking",
+  "Detecta mejor, ajusta porciones y añade contexto antes de guardar.":
+    "Detect better, adjust portions and add context before saving.",
+  "Añade apoyo contextual para afinar porciones y macros antes de guardar.":
+    "Adds contextual support to refine portions and macros before saving.",
+  "Más proteína sin pasarte de kcal": "More protein without overshooting calories",
+  "Más proteína con lo que ya tienes": "More protein with what you already have",
+  "IA que añade contexto útil": "AI that adds useful context",
+  "No solo detecta un producto o una foto: contrasta etiquetas, ajusta porciones y te deja seguir el día con menos ruido.":
+    "It does more than detect a product or a photo: it cross-checks labels, adjusts portions and helps you keep the day on track with less noise.",
+  "No se queda en detectar una foto o un producto: añade contexto cuando hace falta y te ayuda a convertir ingredientes en opciones más útiles para tu día.":
+    "It does not stop at detecting a photo or a product: it adds context when needed and helps turn your ingredients into options that fit your day better.",
+  "Preguntas cuando hacen falta": "Questions when they help",
+  "La IA añade contexto a la foto para afinar porciones y macros.":
+    "AI adds context to the photo to refine portions and macros.",
+  "Recetas con lo que tienes": "Recipes with what you have",
+  "Genera opciones según ingredientes disponibles y necesidades del día.":
+    "Generate options based on available ingredients and your needs for the day.",
+  "Menos fricción al registrar": "Less friction when logging",
+  "Más contexto cuando dudas": "More context when you need it",
+  "Decisiones guiadas por tu día": "Decisions guided by your day",
+  "Una pantalla para registrar. Otra para entender.": "One screen to log. Another to understand.",
+  "NutriTracker junta escaneo, IA y seguimiento corporal en un sistema pensado para decisiones diarias, no para llenar formularios.":
+    "NutriTracker brings together scanning, AI and body tracking in a system built for daily decisions, not for filling forms.",
+  "NutriTracker junta escaneo, IA con apoyo contextual y recetas guiadas por ingredientes en un sistema pensado para decidir mejor cada día.":
+    "NutriTracker combines scanning, AI with contextual support and ingredient-guided recipes in a system built to help you decide better every day.",
+  "Escanea productos, afina fotos con preguntas de apoyo cuando hace falta contexto y genera opciones según lo que tienes y lo que te falta hoy.":
+    "Scan products, refine photos with follow-up questions when context is needed and generate options based on what you have and what you still need today.",
   "Marca": "Mark",
   "Marca: {{brand}}": "Brand: {{brand}}",
   "Masculino": "Masculine",
