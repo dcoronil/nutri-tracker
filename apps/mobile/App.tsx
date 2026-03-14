@@ -878,6 +878,34 @@ function normalizeBaseUrl(raw: string): string {
   return `http://${trimmed.replace(/\/+$/, "")}`;
 }
 
+function isLocalWebHost(host: string): boolean {
+  return host === "localhost" || host === "127.0.0.1";
+}
+
+function validateResolvedApiBaseUrl(baseUrl: string): string | null {
+  if (!baseUrl) {
+    return "API base URL no configurada. Define EXPO_PUBLIC_API_BASE_URL para la web desplegada.";
+  }
+
+  if (Platform.OS !== "web" || typeof window === "undefined") {
+    return null;
+  }
+
+  const currentOrigin = window.location.origin.replace(/\/+$/, "");
+  const currentHost = window.location.hostname.trim().toLowerCase();
+  const normalized = baseUrl.replace(/\/+$/, "");
+
+  if (window.location.protocol === "https:" && normalized.startsWith("http://")) {
+    return "La API configurada usa HTTP y la web está en HTTPS. Usa una URL pública HTTPS para el backend.";
+  }
+
+  if (currentHost.endsWith(".pages.dev") && normalized === currentOrigin) {
+    return "La API base URL apunta a la web estática de Cloudflare Pages. Configura la URL pública real del backend.";
+  }
+
+  return null;
+}
+
 function defaultWebSignupDraft(): WebSignupDraft {
   return {
     step: 1,
@@ -1055,8 +1083,8 @@ function inferApiBaseUrl(): string {
 
   if (Platform.OS === "web" && typeof window !== "undefined") {
     const host = window.location.hostname;
-    if (host && host !== "localhost" && host !== "127.0.0.1") {
-      return `http://${host}:8000`;
+    if (host && !isLocalWebHost(host)) {
+      return "";
     }
     return "http://localhost:8000";
   }
@@ -1289,6 +1317,18 @@ function parseApiError(error: unknown): string {
   }
   if (message.trim() === "Not Found" || message.includes("404")) {
     return "Endpoint no encontrado. Revisa la API base URL en Ajustes.";
+  }
+  if (message.includes("405") || message.includes("Method Not Allowed")) {
+    return "La web está llamando a una URL que no acepta este login. Revisa EXPO_PUBLIC_API_BASE_URL y que apunte al backend público.";
+  }
+  if (message.includes("Cloudflare Pages")) {
+    return message;
+  }
+  if (message.includes("API base URL no configurada")) {
+    return message;
+  }
+  if (message.includes("usa HTTP y la web está en HTTPS")) {
+    return message;
   }
 
   return message;
@@ -1700,11 +1740,16 @@ function AuthProvider({ children }: { children: import("react").ReactNode }) {
     async <T,>(path: string, init?: RequestInit, authToken?: string | null): Promise<T> => {
       const headers = new Headers(init?.headers ?? {});
       const effectiveToken = authToken ?? token;
+      const baseUrl = normalizeBaseUrl(apiBaseUrl);
+      const apiBaseUrlError = validateResolvedApiBaseUrl(baseUrl);
+      if (apiBaseUrlError) {
+        throw new Error(apiBaseUrlError);
+      }
       if (effectiveToken) {
         headers.set("Authorization", `Bearer ${effectiveToken}`);
       }
 
-      const response = await fetch(`${normalizeBaseUrl(apiBaseUrl)}${path}`, {
+      const response = await fetch(`${baseUrl}${path}`, {
         ...init,
         headers,
       });
@@ -1731,7 +1776,12 @@ function AuthProvider({ children }: { children: import("react").ReactNode }) {
         onUploadProgress?: (progress: { loaded: number; total: number; ratio: number }) => void;
       },
     ): Promise<T> => {
-      const targetUrl = `${normalizeBaseUrl(apiBaseUrl)}${path}`;
+      const baseUrl = normalizeBaseUrl(apiBaseUrl);
+      const apiBaseUrlError = validateResolvedApiBaseUrl(baseUrl);
+      if (apiBaseUrlError) {
+        throw new Error(apiBaseUrlError);
+      }
+      const targetUrl = `${baseUrl}${path}`;
       const effectiveToken = options?.authToken ?? token;
       const timeoutMs = options?.timeoutMs ?? 45000;
 
@@ -3133,6 +3183,7 @@ function GoogleAuthButton(props: {
   missingConfigText?: string;
 }) {
   const hostRef = useRef<View | null>(null);
+  const [hostWidth, setHostWidth] = useState(320);
   const [ready, setReady] = useState<boolean>(() => Platform.OS === "web" && typeof window !== "undefined" && Boolean(window.google?.accounts?.id));
   const [loadingScript, setLoadingScript] = useState(false);
   const { disabled, helperText, mode, onCredential, variant = "card", showConfigHint = false, missingConfigText } = props;
@@ -3206,9 +3257,9 @@ function GoogleAuthButton(props: {
       text: mode,
       shape: "pill",
       logo_alignment: "left",
-      width: 320,
+      width: Math.max(240, Math.min(360, Math.round(hostWidth || 320))),
     });
-  }, [mode, onCredential, ready]);
+  }, [hostWidth, mode, onCredential, ready]);
 
   if (Platform.OS !== "web") {
     return null;
@@ -3232,7 +3283,12 @@ function GoogleAuthButton(props: {
     return (
       <View style={[styles.googleAuthInlineWrap, disabled && styles.googleAuthCardDisabled]}>
         {helperText ? <Text style={styles.googleAuthInlineHelper}>{helperText}</Text> : null}
-        <View pointerEvents={disabled ? "none" : "auto"} ref={hostRef as never} style={styles.googleAuthButtonHostInline} />
+        <View
+          pointerEvents={disabled ? "none" : "auto"}
+          ref={hostRef as never}
+          onLayout={(event) => setHostWidth(event.nativeEvent.layout.width)}
+          style={styles.googleAuthButtonHostInline}
+        />
         {loadingScript && !ready ? <Text style={styles.fieldHelperText}>Cargando acceso con Google...</Text> : null}
       </View>
     );
@@ -3242,7 +3298,12 @@ function GoogleAuthButton(props: {
     <View style={[styles.googleAuthCard, disabled && styles.googleAuthCardDisabled]}>
       <Text style={styles.googleAuthTitle}>Google</Text>
       <Text style={styles.googleAuthSubtitle}>{helperText ?? "Usa tu cuenta de Google sin escribir contraseña."}</Text>
-      <View pointerEvents={disabled ? "none" : "auto"} ref={hostRef as never} style={styles.googleAuthButtonHost} />
+      <View
+        pointerEvents={disabled ? "none" : "auto"}
+        ref={hostRef as never}
+        onLayout={(event) => setHostWidth(event.nativeEvent.layout.width)}
+        style={styles.googleAuthButtonHost}
+      />
       {loadingScript && !ready ? <Text style={styles.fieldHelperText}>Cargando acceso con Google...</Text> : null}
     </View>
   );
@@ -5265,7 +5326,14 @@ function WebLoginScreen({ onBack, onCreate }: { onBack: () => void; onCreate: ()
       await auth.login({ email: identifier.trim().toLowerCase(), password });
     } catch (error) {
       const message = parseApiError(error);
-      setErrorMessage(message.includes("Endpoint no encontrado") ? `${message}\nURL API activa: ${auth.apiBaseUrl}` : message);
+      setErrorMessage(
+        message.includes("Endpoint no encontrado") ||
+          message.includes("API base URL") ||
+          message.includes("Cloudflare Pages") ||
+          message.includes("405")
+          ? `${message}\nURL API activa: ${auth.apiBaseUrl || "sin configurar"}`
+          : message,
+      );
     } finally {
       setLoading(false);
     }
@@ -5277,7 +5345,8 @@ function WebLoginScreen({ onBack, onCreate }: { onBack: () => void; onCreate: ()
     try {
       await auth.googleSignIn({ credential });
     } catch (error) {
-      setErrorMessage(parseApiError(error));
+      const message = parseApiError(error);
+      setErrorMessage(message.includes("API base URL") || message.includes("Cloudflare Pages") ? `${message}\nURL API activa: ${auth.apiBaseUrl || "sin configurar"}` : message);
     } finally {
       setLoading(false);
     }
@@ -15368,7 +15437,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   googleAuthInlineWrap: {
-    gap: 10,
+    width: "100%",
+    alignItems: "center",
+    gap: 12,
   },
   googleAuthInlineMissing: {
     borderWidth: 1,
@@ -15392,10 +15463,13 @@ const styles = StyleSheet.create({
     color: theme.muted,
     fontSize: 12,
     lineHeight: 18,
+    textAlign: "center",
+    maxWidth: 420,
   },
   googleAuthButtonHostInline: {
-    minHeight: 42,
-    alignItems: "flex-start",
+    width: "100%",
+    minHeight: 44,
+    alignItems: "center",
     justifyContent: "center",
   },
   webLandingScreen: {
@@ -16087,9 +16161,13 @@ const styles = StyleSheet.create({
   },
   webAuthCardCompact: {
     maxWidth: 560,
+    paddingHorizontal: 30,
+    paddingVertical: 28,
+    gap: 22,
   },
   webAuthHeader: {
-    gap: 8,
+    gap: 9,
+    alignItems: "center",
   },
   webAuthCardTitle: {
     color: theme.text,
@@ -16101,6 +16179,7 @@ const styles = StyleSheet.create({
     color: theme.muted,
     fontSize: 14,
     lineHeight: 21,
+    textAlign: "center",
   },
   webAuthErrorCard: {
     borderWidth: 1,
@@ -16120,7 +16199,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
-    paddingTop: 2,
+    paddingTop: 4,
   },
   webAuthLinkLabel: {
     color: theme.muted,
@@ -16455,17 +16534,19 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
-    marginVertical: 4,
+    marginVertical: 6,
   },
   webWizardDividerLine: {
     flex: 1,
     height: 1,
-    backgroundColor: theme.border,
+    backgroundColor: "rgba(255,255,255,0.08)",
   },
   webWizardDividerText: {
-    color: theme.muted,
-    fontSize: 12,
+    color: "#95a0ae",
+    fontSize: 11,
     fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
   },
   webOnboardingErrorText: {
     color: theme.danger,
