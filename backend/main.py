@@ -2,7 +2,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from routers.auth import router as auth_router
+from routers.auth import auth_router, session_router
 from routers.health import router as health_router
 
 load_dotenv()
@@ -16,9 +16,11 @@ app = FastAPI(
 # Allow the Cloudflare Pages frontend and local development origins.
 # If you later add a custom domain for the frontend, append it here.
 allowed_origins = [
+    "https://nutri-tracker.pages.dev",
     "https://nutria-web.pages.dev",
     "http://localhost:3000",
     "http://localhost:19006",
+    "http://localhost:8081",
 ]
 
 app.add_middleware(
@@ -42,3 +44,4 @@ def root() -> dict[str, str]:
 # - add a Google auth service that validates the Google credential and maps it to a user
 app.include_router(health_router)
 app.include_router(auth_router)
+app.include_router(session_router)
