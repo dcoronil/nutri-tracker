@@ -4,5 +4,6 @@
     "strict": true,
     "noImplicitAny": true,
     "noUncheckedIndexedAccess": true
-  }
+  },
+  "exclude": ["dist", ".expo"]
 }

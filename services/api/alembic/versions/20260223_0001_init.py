@@ -7,6 +7,7 @@ Create Date: 2026-02-23 00:00:00
 """
 
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 
 from alembic import op
 
@@ -17,8 +18,20 @@ branch_labels = None
 depends_on = None
 
 
-nutrition_basis_enum = sa.Enum("per_100g", "per_100ml", "per_serving", name="nutritionbasis")
-intake_method_enum = sa.Enum("grams", "percent_pack", "units", name="intakemethod")
+nutrition_basis_enum = postgresql.ENUM(
+    "per_100g",
+    "per_100ml",
+    "per_serving",
+    name="nutritionbasis",
+    create_type=False,
+)
+intake_method_enum = postgresql.ENUM(
+    "grams",
+    "percent_pack",
+    "units",
+    name="intakemethod",
+    create_type=False,
+)
 
 
 def upgrade() -> None:
