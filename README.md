@@ -124,3 +124,11 @@ Mobile (tipado):
 cd apps/mobile
 npx tsc --noEmit
 ```
+
+## Reproducible checks
+
+The API lives in `services/api` and uses Alembic migrations against the PostgreSQL service defined in `infra/docker-compose.yml`. Run `make api-test` and `make api-lint` after installing the API extras. The mobile app is in `apps/mobile`; `npm ci` followed by `npx tsc --noEmit` checks its TypeScript surface.
+
+The repository intentionally keeps provider secrets in environment variables. Copy `.env.example` to `.env` for local use and never commit that file. The CI workflow runs tests and static checks without requiring production credentials.
+
+Current limitations include dependence on local PostgreSQL for the full stack, external email/AI providers for optional flows, and a mobile client that still needs a device or emulator for interaction testing.
