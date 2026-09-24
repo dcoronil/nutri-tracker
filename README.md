@@ -85,7 +85,7 @@ npm ci
 npx tsc --noEmit
 ```
 
-GitHub Actions runs these backend and mobile checks on pushes to `master` or `chore/**`, and on pull requests targeting `master`. The API job also starts PostgreSQL 16, runs `alembic upgrade head` against an empty database, checks the resulting schema and validates the Compose file. A device or emulator is still required for interactive mobile testing. External email, food and AI providers are optional integrations and are not exercised by the fast unit-test suite.
+GitHub Actions runs these backend and mobile checks on pushes to `main` or `chore/**`, and on pull requests targeting `main`. The API job also starts PostgreSQL 16, runs `alembic upgrade head` against an empty database, checks the resulting schema and validates the Compose file. A device or emulator is still required for interactive mobile testing. External email, food and AI providers are optional integrations and are not exercised by the fast unit-test suite.
 
 ## Current limitations
 
