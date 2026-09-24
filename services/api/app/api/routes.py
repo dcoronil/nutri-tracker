@@ -41,6 +41,7 @@ from app.models import (
     PendingRegistration,
     Product,
     RecipeMealType,
+    Sex,
     SocialComment,
     SocialLike,
     SocialPost,
@@ -76,11 +77,11 @@ from app.schemas import (
     DaySummary,
     FavoriteProductRead,
     FavoriteProductToggleResponse,
-    FriendshipOverviewResponse,
     FoodSearchItem,
     FoodSearchResponse,
     FriendRequestCreate,
     FriendRequestRead,
+    FriendshipOverviewResponse,
     GoalFeedback,
     GoogleAuthRequest,
     IntakeCreate,
@@ -128,9 +129,9 @@ from app.schemas import (
     UserAIKeyTestRequest,
     UserAIKeyTestResponse,
     UserAIKeyUpsertRequest,
+    UsernameAvailabilityResponse,
     UserRecipeRead,
     UserRecipeUpsert,
-    UsernameAvailabilityResponse,
     VerifyRequest,
     WaterLogCreate,
     WaterLogRead,
@@ -156,7 +157,6 @@ from app.services.auth import (
     verify_otp_code,
     verify_password,
 )
-from app.services.generic_foods import GENERIC_FOODS, GenericFoodEntry
 from app.services.body_metrics import (
     bmi,
     bmi_category,
@@ -171,6 +171,7 @@ from app.services.body_metrics import (
     weekly_weight_change,
 )
 from app.services.email import EmailSendError, send_verification_email
+from app.services.generic_foods import GENERIC_FOODS, GenericFoodEntry
 from app.services.nutrition import (
     IntakeComputationError,
     coherence_questions,
@@ -192,6 +193,7 @@ from app.services.openfoodfacts import (
 from app.services.openfoodfacts import (
     missing_critical_fields as off_missing_critical_fields,
 )
+from app.services.rate_limit import client_key_from_ip, rate_limiter
 from app.services.recipe_ai import (
     RecipeAIError,
     generate_recipe_options_with_ai,
@@ -199,7 +201,6 @@ from app.services.recipe_ai import (
     get_recipe_generation_option,
     store_recipe_generation,
 )
-from app.services.rate_limit import client_key_from_ip, rate_limiter
 from app.services.vision_ai import (
     VisionAIError,
     estimate_meal_with_ai,
@@ -227,6 +228,7 @@ class _RemoteSearchRank:
     relevance_score: float
     quality_score: float
     final_score: float
+
 
 EAN_PATTERN = re.compile(r"^\d{8,14}$")
 MONTH_PATTERN = re.compile(r"^\d{4}-\d{2}$")
@@ -700,9 +702,7 @@ def _resolve_meal_inputs(
     answers = _parse_meal_answers_json(answers_json)
     normalized_portion: Literal["small", "medium", "large"] | None
     normalized_portion = (
-        portion_size
-        if portion_size in {"small", "medium", "large"}
-        else _infer_portion_from_answers(answers)
+        portion_size if portion_size in {"small", "medium", "large"} else _infer_portion_from_answers(answers)
     )
     normalized_added_fats = has_added_fats if has_added_fats is not None else _infer_added_fats_from_answers(answers)
     normalized_quantity_note = (quantity_note or "").strip() or _infer_quantity_note_from_answers(answers)
@@ -823,13 +823,7 @@ def _validate_username(username: str) -> str:
 
 
 def _google_username_slug(raw: str) -> str:
-    ascii_value = (
-        unicodedata.normalize("NFKD", raw)
-        .encode("ascii", "ignore")
-        .decode("ascii")
-        .strip()
-        .lower()
-    )
+    ascii_value = unicodedata.normalize("NFKD", raw).encode("ascii", "ignore").decode("ascii").strip().lower()
     ascii_value = re.sub(r"[^a-z0-9._]+", "_", ascii_value)
     ascii_value = re.sub(r"_+", "_", ascii_value).strip("._")
     if len(ascii_value) < 3:
@@ -867,7 +861,9 @@ def _find_available_username(
             return candidate
         suffix += 1
 
-    raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="No se pudo asignar un username válido.")
+    raise HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="No se pudo asignar un username válido."
+    )
 
 
 async def _verify_google_credential(credential: str) -> dict[str, str]:
@@ -878,7 +874,9 @@ async def _verify_google_credential(credential: str) -> dict[str, str]:
             detail="Google Sign-In no está configurado en el servidor.",
         )
 
-    timeout = httpx.Timeout(settings.google_auth_timeout_seconds, connect=min(1.0, settings.google_auth_timeout_seconds))
+    timeout = httpx.Timeout(
+        settings.google_auth_timeout_seconds, connect=min(1.0, settings.google_auth_timeout_seconds)
+    )
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
             response = await client.get(
@@ -888,7 +886,9 @@ async def _verify_google_credential(credential: str) -> dict[str, str]:
             )
             response.raise_for_status()
     except httpx.HTTPError as exc:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="No se pudo validar la cuenta de Google.") from exc
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="No se pudo validar la cuenta de Google."
+        ) from exc
 
     payload = response.json()
     aud = str(payload.get("aud") or "").strip()
@@ -899,7 +899,9 @@ async def _verify_google_credential(credential: str) -> dict[str, str]:
     email_verified = str(payload.get("email_verified") or "").strip().lower() == "true"
     sub = str(payload.get("sub") or "").strip()
     if not email or not sub or not email_verified:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="La cuenta de Google no devolvió un email verificado.")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="La cuenta de Google no devolvió un email verificado."
+        )
 
     return {
         "email": email,
@@ -1240,7 +1242,13 @@ async def google_auth(
                 detail="Completa sexo y fecha de nacimiento válidos para crear la cuenta con Google.",
             )
 
-        preferred_username = payload.username or (pending.username if pending else None) or identity["given_name"] or identity["name"] or email.split("@")[0]
+        preferred_username = (
+            payload.username
+            or (pending.username if pending else None)
+            or identity["given_name"]
+            or identity["name"]
+            or email.split("@")[0]
+        )
         username = _find_available_username(session, base_username=preferred_username, reserved_email=email)
         random_password = f"google-oauth-{uuid4().hex}{uuid4().hex}"
         user = UserAccount(
@@ -1260,8 +1268,12 @@ async def google_auth(
         if payload.username and payload.username.strip():
             normalized_username = _validate_username(payload.username)
             if normalized_username != user.username:
-                existing_username = session.exec(select(UserAccount).where(UserAccount.username == normalized_username)).first()
-                pending_with_username = session.exec(select(PendingRegistration).where(PendingRegistration.username == normalized_username)).first()
+                existing_username = session.exec(
+                    select(UserAccount).where(UserAccount.username == normalized_username)
+                ).first()
+                pending_with_username = session.exec(
+                    select(PendingRegistration).where(PendingRegistration.username == normalized_username)
+                ).first()
                 if existing_username and existing_username.id != user.id:
                     raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Username already in use")
                 if pending_with_username and pending_with_username.email != email:
@@ -1270,7 +1282,9 @@ async def google_auth(
         if requested_birth_date and user.birth_date is None:
             age = _age_from_birth_date(requested_birth_date)
             if age is None or age < 13:
-                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Debes tener al menos 13 años")
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Debes tener al menos 13 años"
+                )
             user.birth_date = requested_birth_date
         if requested_sex and user.sex == Sex.other:
             user.sex = requested_sex
@@ -1567,7 +1581,9 @@ def _social_user_to_read(request: Request, user: UserAccount) -> SocialUserRead:
     )
 
 
-def _friend_request_to_read(request: Request, friend_request: FriendRequest, other_user: UserAccount) -> FriendRequestRead:
+def _friend_request_to_read(
+    request: Request, friend_request: FriendRequest, other_user: UserAccount
+) -> FriendRequestRead:
     return FriendRequestRead(
         id=friend_request.id,
         status=friend_request.status.value,
@@ -1609,13 +1625,17 @@ async def _store_user_avatar_file(*, user_id: int, photo: UploadFile) -> str:
     if not raw:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="La imagen está vacía.")
     if len(raw) > 8 * 1024 * 1024:
-        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="La imagen supera el límite permitido.")
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="La imagen supera el límite permitido."
+        )
     try:
         image = Image.open(io.BytesIO(raw))
         image = ImageOps.exif_transpose(image)
         image = image.convert("RGB")
     except Exception as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Archivo de imagen no válido.") from exc
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Archivo de imagen no válido."
+        ) from exc
 
     width, height = image.size
     crop_side = min(width, height)
@@ -1708,13 +1728,17 @@ async def _store_social_media_files(
         if not raw:
             continue
         if len(raw) > 10 * 1024 * 1024:
-            raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="Una imagen supera el límite permitido.")
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="Una imagen supera el límite permitido."
+            )
         try:
             image = Image.open(io.BytesIO(raw))
             image = ImageOps.exif_transpose(image)
             image = image.convert("RGB")
         except Exception as exc:
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Archivo de imagen no válido.") from exc
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Archivo de imagen no válido."
+            ) from exc
         image.thumbnail((1600, 1600))
         width, height = image.size
         filename = f"social_{index + 1}.jpg"
@@ -1781,9 +1805,13 @@ def _parse_string_list_json(raw: str | None, field_name: str) -> list[str]:
     try:
         parsed = json.loads(raw)
     except json.JSONDecodeError as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"{field_name} debe ser JSON válido.") from exc
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"{field_name} debe ser JSON válido."
+        ) from exc
     if not isinstance(parsed, list) or any(not isinstance(item, str) for item in parsed):
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"{field_name} debe ser una lista de textos.")
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"{field_name} debe ser una lista de textos."
+        )
     return [item.strip() for item in parsed if item.strip()]
 
 
@@ -1985,7 +2013,9 @@ def _can_view_social_post(post: SocialPost, current_user_id: int, friend_ids: se
     return False
 
 
-def _social_post_source(post_user_id: int, current_user_id: int, friend_ids: set[int]) -> Literal["friends", "explore", "self"]:
+def _social_post_source(
+    post_user_id: int, current_user_id: int, friend_ids: set[int]
+) -> Literal["friends", "explore", "self"]:
     if post_user_id == current_user_id:
         return "self"
     if post_user_id in friend_ids:
@@ -2158,7 +2188,9 @@ def list_social_friends(
     friend_ids = _friend_ids(session, current_user.id)
     if not friend_ids:
         return []
-    rows = session.exec(select(UserAccount).where(UserAccount.id.in_(friend_ids)).order_by(UserAccount.username.asc())).all()
+    rows = session.exec(
+        select(UserAccount).where(UserAccount.id.in_(friend_ids)).order_by(UserAccount.username.asc())
+    ).all()
     return [_social_user_to_read(request, user) for user in rows]
 
 
@@ -2185,8 +2217,16 @@ def list_social_friend_requests(
     users_by_id = {user.id: user for user in users if user.id is not None}
     return FriendshipOverviewResponse(
         friends=list_social_friends(request, current_user, session),
-        incoming_requests=[_friend_request_to_read(request, row, users_by_id[row.from_user_id]) for row in incoming_rows if row.from_user_id in users_by_id],
-        outgoing_requests=[_friend_request_to_read(request, row, users_by_id[row.to_user_id]) for row in outgoing_rows if row.to_user_id in users_by_id],
+        incoming_requests=[
+            _friend_request_to_read(request, row, users_by_id[row.from_user_id])
+            for row in incoming_rows
+            if row.from_user_id in users_by_id
+        ],
+        outgoing_requests=[
+            _friend_request_to_read(request, row, users_by_id[row.to_user_id])
+            for row in outgoing_rows
+            if row.to_user_id in users_by_id
+        ],
     )
 
 
@@ -2207,7 +2247,9 @@ def create_social_friend_request(
     session: Annotated[Session, Depends(get_session)],
 ) -> FriendRequestRead:
     _rate_limit(request, scope="friend_request_create", limit=20, window_seconds=60, key_suffix=str(current_user.id))
-    target_user = _resolve_social_user_or_404(session=session, identifier=payload.to_user_identifier, current_user_id=current_user.id)
+    target_user = _resolve_social_user_or_404(
+        session=session, identifier=payload.to_user_identifier, current_user_id=current_user.id
+    )
     if _are_users_friends(session, current_user.id, target_user.id):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Ya sois amigos")
     existing = _friend_request_between(session, current_user.id, target_user.id)
@@ -2215,7 +2257,9 @@ def create_social_friend_request(
         if existing.status == FriendRequestStatus.pending:
             if existing.from_user_id == current_user.id:
                 raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="La solicitud ya está enviada")
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Tienes una solicitud pendiente de este usuario")
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT, detail="Tienes una solicitud pendiente de este usuario"
+            )
         if existing.status == FriendRequestStatus.accepted:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Ya sois amigos")
         existing.from_user_id = current_user.id
@@ -2252,10 +2296,14 @@ def create_friend_request_compat(
     target_user = session.get(UserAccount, target_user_id)
     if not target_user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuario no encontrado")
-    return create_social_friend_request(FriendRequestCreate(to_user_identifier=target_user.username), request, current_user, session)
+    return create_social_friend_request(
+        FriendRequestCreate(to_user_identifier=target_user.username), request, current_user, session
+    )
 
 
-def _accept_social_friend_request(*, request_id: int, request: Request, current_user: UserAccount, session: Session) -> FriendRequestRead:
+def _accept_social_friend_request(
+    *, request_id: int, request: Request, current_user: UserAccount, session: Session
+) -> FriendRequestRead:
     _rate_limit(request, scope="friend_request_accept", limit=30, window_seconds=60, key_suffix=str(current_user.id))
     friend_request = session.get(FriendRequest, request_id)
     if not friend_request:
@@ -2271,7 +2319,9 @@ def _accept_social_friend_request(*, request_id: int, request: Request, current_
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="La solicitud ya no está pendiente")
     friend_request.status = FriendRequestStatus.accepted
     friend_request.responded_at = datetime.now(UTC)
-    _ensure_friendship_pair(session, friend_request.from_user_id, friend_request.to_user_id, friend_request.responded_at)
+    _ensure_friendship_pair(
+        session, friend_request.from_user_id, friend_request.to_user_id, friend_request.responded_at
+    )
     session.add(friend_request)
     session.commit()
     session.refresh(friend_request)
@@ -2288,7 +2338,9 @@ def accept_social_friend_request(
     current_user: Annotated[UserAccount, Depends(get_verified_user)],
     session: Annotated[Session, Depends(get_session)],
 ) -> FriendRequestRead:
-    return _accept_social_friend_request(request_id=request_id, request=request, current_user=current_user, session=session)
+    return _accept_social_friend_request(
+        request_id=request_id, request=request, current_user=current_user, session=session
+    )
 
 
 @router.post("/social/friend-requests/{friendship_id}/accept", response_model=FriendRequestRead)
@@ -2298,7 +2350,9 @@ def accept_friend_request_compat(
     current_user: Annotated[UserAccount, Depends(get_verified_user)],
     session: Annotated[Session, Depends(get_session)],
 ) -> FriendRequestRead:
-    return _accept_social_friend_request(request_id=friendship_id, request=request, current_user=current_user, session=session)
+    return _accept_social_friend_request(
+        request_id=friendship_id, request=request, current_user=current_user, session=session
+    )
 
 
 @router.post("/social/friends/requests/{request_id}/reject", response_model=FriendRequestRead)
@@ -2343,7 +2397,11 @@ def social_feed(
     friend_priority_ids = list(friend_ids | {current_user.id})
     priority_case = case((SocialPost.user_id.in_(friend_priority_ids), 0), else_=1)
     if scope == "explore":
-        base_query = select(SocialPost).where(SocialPost.visibility == SocialVisibility.public).where(SocialPost.user_id.notin_(friend_priority_ids))
+        base_query = (
+            select(SocialPost)
+            .where(SocialPost.visibility == SocialVisibility.public)
+            .where(SocialPost.user_id.notin_(friend_priority_ids))
+        )
     else:
         base_query = select(SocialPost).where(_social_post_visibility_clause(current_user.id, friend_ids))
     if post_type != "all":
@@ -2356,19 +2414,32 @@ def social_feed(
             or_(
                 priority_case > cursor_priority,
                 and_(priority_case == cursor_priority, SocialPost.created_at < cursor_created_at),
-                and_(priority_case == cursor_priority, SocialPost.created_at == cursor_created_at, SocialPost.id < cursor_post_id),
+                and_(
+                    priority_case == cursor_priority,
+                    SocialPost.created_at == cursor_created_at,
+                    SocialPost.id < cursor_post_id,
+                ),
             )
         )
     elif decoded_cursor is not None:
         _, cursor_created_at, cursor_post_id = decoded_cursor
         base_query = base_query.where(
-            or_(SocialPost.created_at < cursor_created_at, and_(SocialPost.created_at == cursor_created_at, SocialPost.id < cursor_post_id))
+            or_(
+                SocialPost.created_at < cursor_created_at,
+                and_(SocialPost.created_at == cursor_created_at, SocialPost.id < cursor_post_id),
+            )
         )
-    order_by = [priority_case.asc(), desc(SocialPost.created_at), desc(SocialPost.id)] if use_relevance_sort else [desc(SocialPost.created_at), desc(SocialPost.id)]
+    order_by = (
+        [priority_case.asc(), desc(SocialPost.created_at), desc(SocialPost.id)]
+        if use_relevance_sort
+        else [desc(SocialPost.created_at), desc(SocialPost.id)]
+    )
     rows = session.exec(base_query.order_by(*order_by).limit(bounded_limit + 1)).all()
     has_more = len(rows) > bounded_limit
     visible_rows = rows[:bounded_limit]
-    items = _serialize_social_posts(request=request, session=session, posts=visible_rows, current_user_id=current_user.id, friend_ids=friend_ids)
+    items = _serialize_social_posts(
+        request=request, session=session, posts=visible_rows, current_user_id=current_user.id, friend_ids=friend_ids
+    )
     next_cursor = None
     if has_more and visible_rows:
         last_post = visible_rows[-1]
@@ -2418,7 +2489,10 @@ async def create_social_post(
     )
     photo_files = photos or []
     if post.type in {SocialPostType.photo, SocialPostType.recipe} and not photo_files:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Este tipo de publicación necesita al menos una foto.")
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Este tipo de publicación necesita al menos una foto.",
+        )
     try:
         media_rows = await _store_social_media_files(post_id=post_id, photo_files=photo_files)
         session.add(post)
@@ -2427,9 +2501,13 @@ async def create_social_post(
             steps = _parse_string_list_json(recipe_steps_json, "recipe_steps_json")
             tags = _parse_string_list_json(recipe_tags_json, "recipe_tags_json")
             if not recipe_title or not recipe_title.strip():
-                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="El título de la receta es obligatorio.")
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="El título de la receta es obligatorio."
+                )
             if not ingredients or not steps:
-                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="La receta necesita ingredientes y pasos.")
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="La receta necesita ingredientes y pasos."
+                )
             if (
                 recipe_nutrition_kcal is None
                 or recipe_nutrition_protein_g is None
@@ -2508,17 +2586,26 @@ def _social_profile_posts_response(
     if decoded_cursor is not None:
         _, cursor_created_at, cursor_post_id = decoded_cursor
         base_query = base_query.where(
-            or_(SocialPost.created_at < cursor_created_at, and_(SocialPost.created_at == cursor_created_at, SocialPost.id < cursor_post_id))
+            or_(
+                SocialPost.created_at < cursor_created_at,
+                and_(SocialPost.created_at == cursor_created_at, SocialPost.id < cursor_post_id),
+            )
         )
-    rows = session.exec(base_query.order_by(desc(SocialPost.created_at), desc(SocialPost.id)).limit(bounded_limit + 1)).all()
+    rows = session.exec(
+        base_query.order_by(desc(SocialPost.created_at), desc(SocialPost.id)).limit(bounded_limit + 1)
+    ).all()
     has_more = len(rows) > bounded_limit
     visible_rows = rows[:bounded_limit]
     next_cursor = None
     if has_more and visible_rows:
         last_post = visible_rows[-1]
         next_cursor = _encode_social_cursor(0, last_post.created_at, last_post.id)
-    posts_count = session.exec(select(func.count()).select_from(SocialPost).where(SocialPost.user_id == target_user.id)).one()
-    friends_count = session.exec(select(func.count()).select_from(Friendship).where(Friendship.user_id == target_user.id)).one()
+    posts_count = session.exec(
+        select(func.count()).select_from(SocialPost).where(SocialPost.user_id == target_user.id)
+    ).one()
+    friends_count = session.exec(
+        select(func.count()).select_from(Friendship).where(Friendship.user_id == target_user.id)
+    ).one()
     return SocialProfilePostsResponse(
         user=_social_user_to_read(request, target_user),
         is_me=is_me,
@@ -2657,7 +2744,9 @@ def like_social_post(
     friend_ids = _friend_ids(session, current_user.id)
     if not _can_view_social_post(post, current_user.id, friend_ids):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No puedes interactuar con esta publicación")
-    existing = session.exec(select(SocialLike).where(SocialLike.user_id == current_user.id).where(SocialLike.post_id == post_id)).first()
+    existing = session.exec(
+        select(SocialLike).where(SocialLike.user_id == current_user.id).where(SocialLike.post_id == post_id)
+    ).first()
     if existing:
         return SocialLikeToggleResponse(liked=True, like_count=post.like_count)
     session.add(SocialLike(user_id=current_user.id, post_id=post_id))
@@ -2676,7 +2765,9 @@ def unlike_social_post(
     session: Annotated[Session, Depends(get_session)],
 ) -> SocialLikeToggleResponse:
     post = _social_post_or_404(post_id, session)
-    existing = session.exec(select(SocialLike).where(SocialLike.user_id == current_user.id).where(SocialLike.post_id == post_id)).first()
+    existing = session.exec(
+        select(SocialLike).where(SocialLike.user_id == current_user.id).where(SocialLike.post_id == post_id)
+    ).first()
     if existing:
         session.delete(existing)
         post.like_count = max(0, post.like_count - 1)
@@ -2698,12 +2789,19 @@ def list_social_comments(
     friend_ids = _friend_ids(session, current_user.id)
     if not _can_view_social_post(post, current_user.id, friend_ids):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No puedes ver esta publicación")
-    rows = session.exec(select(SocialComment).where(SocialComment.post_id == post_id).order_by(SocialComment.created_at.asc())).all()
+    rows = session.exec(
+        select(SocialComment).where(SocialComment.post_id == post_id).order_by(SocialComment.created_at.asc())
+    ).all()
     user_ids = {row.user_id for row in rows}
     users = session.exec(select(UserAccount).where(UserAccount.id.in_(user_ids))).all() if user_ids else []
     users_by_id = {user.id: user for user in users if user.id is not None}
     return [
-        SocialCommentRead(id=row.id, text=row.text, created_at=row.created_at, user=_social_user_to_read(request, users_by_id[row.user_id]))
+        SocialCommentRead(
+            id=row.id,
+            text=row.text,
+            created_at=row.created_at,
+            user=_social_user_to_read(request, users_by_id[row.user_id]),
+        )
         for row in rows
         if row.user_id in users_by_id
     ]
@@ -2722,14 +2820,21 @@ def create_social_comment(
     friend_ids = _friend_ids(session, current_user.id)
     if not _can_view_social_post(post, current_user.id, friend_ids):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No puedes comentar esta publicación")
-    comment = SocialComment(user_id=current_user.id, post_id=post_id, text=payload.text.strip(), created_at=datetime.now(UTC))
+    comment = SocialComment(
+        user_id=current_user.id, post_id=post_id, text=payload.text.strip(), created_at=datetime.now(UTC)
+    )
     session.add(comment)
     post.comment_count += 1
     post.updated_at = datetime.now(UTC)
     session.add(post)
     session.commit()
     session.refresh(comment)
-    return SocialCommentRead(id=comment.id, text=comment.text, created_at=comment.created_at, user=_social_user_to_read(request, current_user))
+    return SocialCommentRead(
+        id=comment.id,
+        text=comment.text,
+        created_at=comment.created_at,
+        user=_social_user_to_read(request, current_user),
+    )
 
 
 def _recipe_or_404(recipe_id: int, current_user_id: int, session: Session) -> UserRecipe:
@@ -2891,7 +2996,9 @@ def _recommend_recipe_options(
         ):
             if remaining_value is None or remaining_value <= 0:
                 continue
-            macro_balance_score += max(0.0, 8.0 - abs(nutrient_value - remaining_value * 0.45) / max(remaining_value, 1.0) * 8.0)
+            macro_balance_score += max(
+                0.0, 8.0 - abs(nutrient_value - remaining_value * 0.45) / max(remaining_value, 1.0) * 8.0
+            )
         score += macro_balance_score
         if macro_balance_score > 0:
             reasons.append((macro_balance_score, "Mantiene mejor el reparto de macros que te queda hoy"))
@@ -2916,7 +3023,9 @@ def _recommend_recipe_options(
             if gain_bonus > 0:
                 reasons.append((gain_bonus, "Aprovecha mejor una fase de subida sin quedarse corto"))
 
-        recommended_reason = max(reasons, key=lambda item: item[0])[1] if reasons else "Es la opción más equilibrada para ahora"
+        recommended_reason = (
+            max(reasons, key=lambda item: item[0])[1] if reasons else "Es la opción más equilibrada para ahora"
+        )
         scored_options.append((score, recommended_reason, option))
 
     if not scored_options:
@@ -2933,7 +3042,9 @@ def _recommend_recipe_options(
             {
                 **option,
                 "recommended": option_id == recommended_option_id,
-                "recommended_reason": reason_by_option_id.get(option_id) if option_id == recommended_option_id else None,
+                "recommended_reason": reason_by_option_id.get(option_id)
+                if option_id == recommended_option_id
+                else None,
             }
         )
     return enriched_options
@@ -2974,7 +3085,9 @@ def list_my_recipes(
     stmt = select(UserRecipe).where(UserRecipe.user_id == current_user.id)
     if q and q.strip():
         stmt = stmt.where(UserRecipe.title.ilike(f"%{q.strip()}%"))
-    rows = session.exec(stmt.order_by(desc(UserRecipe.updated_at), desc(UserRecipe.created_at)).limit(bounded_limit)).all()
+    rows = session.exec(
+        stmt.order_by(desc(UserRecipe.updated_at), desc(UserRecipe.created_at)).limit(bounded_limit)
+    ).all()
     product_ids = [row.product_id for row in rows]
     products = session.exec(select(Product).where(Product.id.in_(product_ids))).all() if product_ids else []
     products_by_id = {row.id: row for row in products if row.id is not None}
@@ -3027,12 +3140,16 @@ def create_user_recipe(
     _rate_limit(request, scope="user_recipe_create", limit=20, window_seconds=60, key_suffix=str(current_user.id))
     title = payload.title.strip()
     duplicate = session.exec(
-        select(UserRecipe.id).where(UserRecipe.user_id == current_user.id).where(func.lower(UserRecipe.title) == title.lower())
+        select(UserRecipe.id)
+        .where(UserRecipe.user_id == current_user.id)
+        .where(func.lower(UserRecipe.title) == title.lower())
     ).first()
     if duplicate is not None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Ya tienes una receta con ese nombre.")
 
-    product = _upsert_recipe_product(session=session, current_user=current_user, payload=payload, generated_with_ai=False)
+    product = _upsert_recipe_product(
+        session=session, current_user=current_user, payload=payload, generated_with_ai=False
+    )
     recipe = UserRecipe(
         user_id=current_user.id,
         product_id=product.id,
@@ -3171,7 +3288,9 @@ async def generate_recipe(
             assumptions=raw_result["assumptions"],
         )
     except ValidationError as exc:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Respuesta IA inválida: {exc.errors()[0]['msg']}") from exc
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Respuesta IA inválida: {exc.errors()[0]['msg']}"
+        ) from exc
     except RecipeAIError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
@@ -3183,7 +3302,9 @@ async def generate_recipe_ai_options(
     current_user: Annotated[UserAccount, Depends(get_ready_user)],
     session: Annotated[Session, Depends(get_session)],
 ) -> RecipeAiOptionsResponse:
-    _rate_limit(request, scope="user_recipe_generate_options", limit=10, window_seconds=60, key_suffix=str(current_user.id))
+    _rate_limit(
+        request, scope="user_recipe_generate_options", limit=10, window_seconds=60, key_suffix=str(current_user.id)
+    )
     ai_credentials = _user_ai_provider_and_key(current_user, required=True)
     if not ai_credentials:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="No AI credentials available")
@@ -3227,7 +3348,9 @@ async def generate_recipe_ai_options(
             options=[_recipe_ai_option_preview(option) for option in recommended_options],
         )
     except ValidationError as exc:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Respuesta IA inválida: {exc.errors()[0]['msg']}") from exc
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Respuesta IA inválida: {exc.errors()[0]['msg']}"
+        ) from exc
     except RecipeAIError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
@@ -3763,7 +3886,9 @@ def _query_phrase_match(query: str, name: str, brand: str | None) -> bool:
     normalized_query = _normalize_search_text(query)
     if not normalized_query:
         return False
-    combined = " ".join(part for part in (_normalize_search_text(name), _normalize_search_text(brand or "")) if part).strip()
+    combined = " ".join(
+        part for part in (_normalize_search_text(name), _normalize_search_text(brand or "")) if part
+    ).strip()
     return bool(combined) and normalized_query in combined
 
 
@@ -3917,7 +4042,9 @@ def _generic_candidate_names(entry: GenericFoodEntry) -> tuple[str, ...]:
 
 
 def _generic_entry_relevance_score(query: str, entry: GenericFoodEntry) -> float:
-    return max(_text_match_score(query, candidate_name, None, None) for candidate_name in _generic_candidate_names(entry))
+    return max(
+        _text_match_score(query, candidate_name, None, None) for candidate_name in _generic_candidate_names(entry)
+    )
 
 
 def _generic_entry_has_match(query: str, entry: GenericFoodEntry) -> bool:
@@ -3931,7 +4058,9 @@ def _generic_entry_has_match(query: str, entry: GenericFoodEntry) -> bool:
 
 
 def _generic_entry_has_basic_direct_match(entry: GenericFoodEntry, basic_terms: tuple[str, ...]) -> bool:
-    return any(_basic_food_direct_match(candidate_name, basic_terms) for candidate_name in _generic_candidate_names(entry))
+    return any(
+        _basic_food_direct_match(candidate_name, basic_terms) for candidate_name in _generic_candidate_names(entry)
+    )
 
 
 def _generic_entry_is_relevant(query: str, entry: GenericFoodEntry, relevance_score: float) -> bool:
@@ -4019,9 +4148,7 @@ def _ensure_generic_products(session: Session, entries: list[GenericFoodEntry]) 
         return []
 
     existing_rows = session.exec(
-        select(Product)
-        .where(Product.source == "generic")
-        .where(Product.name.in_([entry.name for entry in entries]))
+        select(Product).where(Product.source == "generic").where(Product.name.in_([entry.name for entry in entries]))
     ).all()
     by_name = {row.name: row for row in existing_rows}
 
@@ -4268,9 +4395,7 @@ def _local_search_score(
     text_score: float | None = None,
 ) -> float:
     score = (
-        text_score
-        if text_score is not None
-        else _text_match_score(query, product.name, product.brand, product.barcode)
+        text_score if text_score is not None else _text_match_score(query, product.name, product.brand, product.barcode)
     )
     score += _source_priority_score(product)
     score += _name_legibility_penalty(product.name)
@@ -4588,9 +4713,7 @@ def _local_search_candidates_fallback(
         favorite_ids = set(favorite_rows)
 
         user_intakes = session.exec(
-            select(Intake.product_id)
-            .where(Intake.user_id == current_user.id)
-            .where(Intake.product_id.in_(product_ids))
+            select(Intake.product_id).where(Intake.user_id == current_user.id).where(Intake.product_id.in_(product_ids))
         ).all()
         for product_id in user_intakes:
             user_use_counts[product_id] = user_use_counts.get(product_id, 0) + 1
@@ -4652,7 +4775,9 @@ def _local_search_candidates(
                 return fallback_ranked
 
             merged: list[_LocalSearchRank] = list(postgres_ranked)
-            seen_product_ids = {candidate.product.id for candidate in postgres_ranked if candidate.product.id is not None}
+            seen_product_ids = {
+                candidate.product.id for candidate in postgres_ranked if candidate.product.id is not None
+            }
             for candidate in fallback_ranked:
                 product = candidate.product
                 if product.id is not None and product.id in seen_product_ids:
@@ -6107,9 +6232,7 @@ def widget_today_summary(
     summary = _day_summary(day=today, current_user=current_user, session=session)
 
     latest_weight = session.exec(
-        select(BodyWeightLog)
-        .where(BodyWeightLog.user_id == current_user.id)
-        .order_by(desc(BodyWeightLog.created_at))
+        select(BodyWeightLog).where(BodyWeightLog.user_id == current_user.id).order_by(desc(BodyWeightLog.created_at))
     ).first()
 
     protein_goal = summary.goal.protein_goal if summary.goal else 0.0

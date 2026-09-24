@@ -25,6 +25,11 @@ def engine(tmp_path):
 
 @pytest.fixture(autouse=True)
 def media_storage_env(tmp_path, monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "testing")
+    monkeypatch.setenv("AUTH_SECRET_KEY", "test-auth-secret-key")
+    monkeypatch.setenv("AI_KEY_ENCRYPTION_SECRET", "test-ai-encryption-secret")
+    monkeypatch.setenv("EXPOSE_VERIFICATION_CODE", "true")
+    monkeypatch.setenv("DEV_EMAIL_MODE", "true")
     monkeypatch.setenv("SOCIAL_MEDIA_STORAGE_DIR", str(tmp_path / "social-media"))
     monkeypatch.setenv("MEAL_ANALYSIS_STORAGE_DIR", str(tmp_path / "meal-analysis"))
     get_settings.cache_clear()

@@ -112,7 +112,10 @@ def _postprocess_generated_recipe(
     conservative_kcal = max(raw_kcal, macro_kcal)
     cleaned_assumptions = [str(item).strip() for item in assumptions if str(item).strip()]
     if macro_kcal > 0 and (raw_kcal <= 0 or abs(raw_kcal - macro_kcal) / macro_kcal > 0.12):
-        cleaned_assumptions = [*cleaned_assumptions, "Se ajustaron kcal para mantener coherencia básica con los macros."]
+        cleaned_assumptions = [
+            *cleaned_assumptions,
+            "Se ajustaron kcal para mantener coherencia básica con los macros.",
+        ]
 
     return {
         "model_used": RECIPE_MODEL,
@@ -187,7 +190,9 @@ def get_recipe_generation_option(*, user_id: int, generation_id: str, option_id:
     return None
 
 
-async def _run_recipe_ai_request(*, api_key: str, system_prompt: str, user_prompt: str, max_tokens: int) -> dict[str, Any]:
+async def _run_recipe_ai_request(
+    *, api_key: str, system_prompt: str, user_prompt: str, max_tokens: int
+) -> dict[str, Any]:
     settings = get_settings()
     payload = {
         "model": RECIPE_MODEL,
@@ -250,7 +255,8 @@ async def generate_recipe_with_ai(
         "You are a strict nutrition recipe generator for a fitness app. "
         "Return only valid JSON with no markdown. "
         "Respect the allowed ingredients policy exactly. "
-        "If use_only_ingredients is true, do not add ingredients outside the provided list except pantry basics when allowed. "
+        "If use_only_ingredients is true, do not add ingredients outside the provided list "
+        "except pantry basics when allowed. "
         "Be conservative with nutrition: never understate calories, never overstate protein."
     )
 
@@ -336,7 +342,8 @@ async def generate_recipe_options_with_ai(
         "Generate exactly 3 materially different recipe options, not tiny variations. "
         "Each option must differ in structure, ingredients balance, cooking approach, or macro profile. "
         "Respect the allowed ingredients policy exactly. "
-        "If use_only_ingredients is true, do not add ingredients outside the provided list except pantry basics when allowed. "
+        "If use_only_ingredients is true, do not add ingredients outside the provided list "
+        "except pantry basics when allowed. "
         "Be conservative with nutrition: never understate calories, never overstate protein."
     )
 

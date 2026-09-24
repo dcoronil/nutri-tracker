@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import re
 
-from alembic import op
 import sqlalchemy as sa
 
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision = "20260303_0012"
@@ -77,9 +77,7 @@ def _dedupe_username(base: str, used: set[str]) -> str:
 
 def _backfill_usernames(bind: sa.Connection, table_name: str, used_seed: set[str] | None = None) -> set[str]:
     used = set(used_seed or set())
-    rows = bind.execute(
-        sa.text(f"SELECT id, email, username FROM {table_name} ORDER BY id")
-    ).mappings()
+    rows = bind.execute(sa.text(f"SELECT id, email, username FROM {table_name} ORDER BY id")).mappings()
 
     for row in rows:
         existing = _normalize_username(row.get("username"))

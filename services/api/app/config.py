@@ -1,8 +1,8 @@
+import secrets
 from functools import lru_cache
 from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
-
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
@@ -10,6 +10,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
+    environment: str = "development"
     api_host: str = "0.0.0.0"
     api_port: int = 8000
     database_url: str = "postgresql+psycopg://nutri:nutri@localhost:5432/nutri_tracker"
@@ -27,7 +28,7 @@ class Settings(BaseSettings):
     openfoodfacts_http_max_connections: int = 10
     openfoodfacts_http_keepalive_connections: int = 6
     ocr_lang: str = "eng+spa"
-    auth_secret_key: str = "change-me-in-production"
+    auth_secret_key: str = ""
     auth_token_ttl_hours: int = 720
     verification_code_ttl_minutes: int = 15
     google_web_client_id: str | None = None
@@ -41,9 +42,10 @@ class Settings(BaseSettings):
     smtp_from_email: str = "no-reply@nutri-tracker.local"
     smtp_use_tls: bool = True
     smtp_use_ssl: bool = False
-    expose_verification_code: bool = True
-    dev_email_mode: bool = True
-    ai_key_encryption_secret: str = "change-me-ai-key-secret"
+    expose_verification_code: bool = False
+    dev_email_mode: bool = False
+    ai_key_encryption_secret: str = ""
+    cors_origins: str = "http://localhost:8081,http://127.0.0.1:8081,http://localhost:19006,http://127.0.0.1:19006"
     openai_base_url: str = "https://api.openai.com/v1"
     openai_vision_model: str = "gpt-4o-mini"
     openai_vision_timeout_seconds: float = 35.0
@@ -52,6 +54,31 @@ class Settings(BaseSettings):
     meal_analysis_ttl_minutes: int = 30
     meal_analysis_storage_dir: str = "/tmp/nutri-tracker/meal-analysis"
     social_media_storage_dir: str = str(PROJECT_ROOT / ".data" / "social-media")
+
+    def model_post_init(self, __context: object) -> None:
+        if self.environment.lower() not in {"production", "prod"} and not self.auth_secret_key:
+            self.auth_secret_key = secrets.token_urlsafe(32)
+        if self.environment.lower() not in {"production", "prod"} and not self.ai_key_encryption_secret:
+            self.ai_key_encryption_secret = secrets.token_urlsafe(32)
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+
+    def validate_for_runtime(self) -> None:
+        if self.environment.lower() not in {"production", "prod"}:
+            return
+        forbidden = {
+            "change-me-in-production",
+            "change-me-ai-key-secret",
+            "",
+        }
+        if self.auth_secret_key in forbidden or self.ai_key_encryption_secret in forbidden:
+            raise RuntimeError("Production requires explicit AUTH_SECRET_KEY and AI_KEY_ENCRYPTION_SECRET values")
+        if self.database_url.endswith("nutri:nutri@localhost:5432/nutri_tracker"):
+            raise RuntimeError("Production requires an explicit DATABASE_URL")
+        if "*" in self.cors_origin_list:
+            raise RuntimeError("Production CORS_ORIGINS must list explicit origins")
 
 
 @lru_cache
