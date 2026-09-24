@@ -43,13 +43,14 @@ def create_app() -> FastAPI:
 
     app = FastAPI(title="Nutri Tracker API", version="0.1.0", lifespan=lifespan)
     settings = get_settings()
+    settings.validate_for_runtime()
     social_media_root = Path(settings.social_media_storage_dir).expanduser()
     social_media_root.mkdir(parents=True, exist_ok=True)
     _migrate_legacy_social_media(LEGACY_SOCIAL_MEDIA_ROOT.expanduser(), social_media_root)
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=settings.cors_origin_list,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
