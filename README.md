@@ -83,11 +83,11 @@ npm ci
 npx tsc --noEmit
 ```
 
-GitHub Actions runs these backend and mobile checks on pushes to `master` or `chore/**`, and on pull requests targeting `master`. A device or emulator is still required for interactive mobile testing. External email, food and AI providers are optional integrations and are not exercised by the fast unit-test suite.
+GitHub Actions runs these backend and mobile checks on pushes to `master` or `chore/**`, and on pull requests targeting `master`. The API job also starts PostgreSQL 16, runs `alembic upgrade head` against an empty database, checks the resulting schema and validates the Compose file. A device or emulator is still required for interactive mobile testing. External email, food and AI providers are optional integrations and are not exercised by the fast unit-test suite.
 
 ## Current limitations
 
-The repository does not provide a hosted environment or production secret-management system. Docker/PostgreSQL integration checks need a local Docker installation. Mobile dependency advisories remain in the Expo SDK 54 dependency tree; upgrading them safely requires a coordinated Expo upgrade rather than a forced audit rewrite.
+The repository does not provide a hosted environment or production secret-management system. Mobile dependency advisories remain in the Expo SDK 54 dependency tree after applying the compatible SDK 54 patch updates. The latest audit reports 27 total issues and 26 with `--omit=dev`; the high/critical entries are transitive build and CLI packages such as Metro, `@expo/cli`, `tar`, `shell-quote`, `postcss` and `ws`, and are not imported by the application source or included in the mobile bundle. npm only offers a complete tree-level fix through Expo 57, so the major upgrade is deliberately deferred until it can be tested as a separate migration.
 
 ## Engineering notes
 

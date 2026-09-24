@@ -15,6 +15,22 @@ jobs:
     defaults:
       run:
         working-directory: services/api
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: nutri_tracker
+          POSTGRES_USER: nutri
+          POSTGRES_PASSWORD: ci_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U nutri -d nutri_tracker"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql+psycopg://nutri:ci_password@localhost:5432/nutri_tracker
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -22,6 +38,15 @@ jobs:
           python-version: '3.11'
       - name: Install API dependencies
         run: python -m pip install -e '.[dev]'
+      - name: Validate Docker Compose configuration
+        working-directory: .
+        run: docker compose -f infra/docker-compose.yml config
+      - name: Apply PostgreSQL migrations
+        run: python -m alembic upgrade head
+      - name: Check PostgreSQL schema
+        run: >-
+          python -c "import os; from sqlalchemy import create_engine, text;
+          print(create_engine(os.environ['DATABASE_URL']).connect().execute(text('select count(*) from information_schema.tables')).scalar_one())"
       - name: Lint
         run: python -m ruff check .
       - name: Test
