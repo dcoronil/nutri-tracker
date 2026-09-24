@@ -1,5 +1,7 @@
 # Nutri Tracker
 
+[![CI](https://github.com/dcoronil/nutri-tracker/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/dcoronil/nutri-tracker/actions/workflows/ci.yml)
+
 Nutri Tracker is a personal nutrition tracking application. It combines an Expo mobile client with a FastAPI API and a PostgreSQL database. The current product flow covers account verification, onboarding, food lookup, label capture and daily intake summaries.
 
 ## Architecture
@@ -63,7 +65,7 @@ The development email mode can print verification codes in API logs when SMTP is
 
 ## Database and migrations
 
-The API uses Alembic migrations. Start PostgreSQL with `infra/docker-compose.yml`, then run the repository's setup target or `alembic upgrade head` from `services/api`. The full migration path requires PostgreSQL; the CI workflow currently validates the API tests without a service container.
+The API uses Alembic migrations. Start PostgreSQL with `infra/docker-compose.yml`, then run the repository's setup target or `alembic upgrade head` from `services/api`. The full migration path requires PostgreSQL; the CI workflow validates the API tests with a PostgreSQL 16 service container, applies the Alembic migrations, and checks the resulting schema.
 
 ## Validation
 
