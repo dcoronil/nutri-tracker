@@ -1,6 +1,6 @@
 # Nutri Tracker
 
-[![CI](https://github.com/dcoronil/nutri-tracker/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/dcoronil/nutri-tracker/actions/workflows/ci.yml)
+[![CI](https://github.com/dcoronil/nutri-tracker/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/dcoronil/nutri-tracker/actions/workflows/ci.yml)
 
 Nutri Tracker is a personal nutrition tracking application. It combines an Expo mobile client with a FastAPI API and a PostgreSQL database. The current product flow covers account verification, onboarding, food lookup, label capture and daily intake summaries.
 
