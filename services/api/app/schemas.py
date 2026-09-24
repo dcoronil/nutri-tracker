@@ -338,7 +338,7 @@ class UserRecipeUpsert(BaseModel):
     default_quantity_units: float | None = Field(default=None, gt=0, le=100)
 
     @model_validator(mode="after")
-    def validate_recipe_content(self) -> "UserRecipeUpsert":
+    def validate_recipe_content(self) -> UserRecipeUpsert:
         cleaned_steps = [step.strip() for step in self.steps if step.strip()]
         if not self.ingredients:
             raise ValueError("Añade al menos un ingrediente.")
@@ -376,7 +376,7 @@ class RecipeGenerateRequest(BaseModel):
     locale: Literal["es", "en"] | None = None
 
     @model_validator(mode="after")
-    def validate_ingredients(self) -> "RecipeGenerateRequest":
+    def validate_ingredients(self) -> RecipeGenerateRequest:
         if not self.available_ingredients:
             raise ValueError("Añade al menos un ingrediente disponible.")
         self.allergies = [item.strip() for item in self.allergies if item.strip()][:16]

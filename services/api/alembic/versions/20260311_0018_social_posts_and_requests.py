@@ -11,7 +11,6 @@ import sqlalchemy as sa
 
 from alembic import op
 
-
 # revision identifiers, used by Alembic.
 revision = "20260311_0018"
 down_revision = "20260311_0017"
@@ -206,7 +205,9 @@ def upgrade() -> None:
     bind = op.get_bind()
     inspector = sa.inspect(bind)
 
-    if _has_table(inspector, "friendship") and {"requester_user_id", "addressee_user_id", "status"} <= _column_names(inspector, "friendship"):
+    if _has_table(inspector, "friendship") and {"requester_user_id", "addressee_user_id", "status"} <= _column_names(
+        inspector, "friendship"
+    ):
         _create_friend_request_table(inspector)
         op.execute(
             sa.text(
@@ -287,7 +288,16 @@ def downgrade() -> None:
             op.drop_index(index_name, table_name=table_name)
             inspector = sa.inspect(bind)
 
-    for table_name in ["social_comment", "social_like", "social_progress", "social_recipe", "social_post_media", "social_post", "friendship", "friend_request"]:
+    for table_name in [
+        "social_comment",
+        "social_like",
+        "social_progress",
+        "social_recipe",
+        "social_post_media",
+        "social_post",
+        "friendship",
+        "friend_request",
+    ]:
         if _has_table(inspector, table_name):
             op.drop_table(table_name)
             inspector = sa.inspect(bind)

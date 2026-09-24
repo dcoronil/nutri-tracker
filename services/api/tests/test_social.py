@@ -7,6 +7,7 @@ from sqlmodel import Session, select
 
 from app.models import SocialPost, SocialPostMedia
 
+
 def _create_verified_user(client, username_prefix: str) -> dict[str, object]:
     email = f"{username_prefix}-{uuid4().hex[:8]}@example.com"
     username = f"{username_prefix}_{uuid4().hex[:8]}"
@@ -34,7 +35,9 @@ def _create_verified_user(client, username_prefix: str) -> dict[str, object]:
     }
 
 
-def _create_progress_post(client, headers, *, visibility: str = "friends", caption: str = "post", weight_kg: float | None = None):
+def _create_progress_post(
+    client, headers, *, visibility: str = "friends", caption: str = "post", weight_kg: float | None = None
+):
     response = client.post(
         "/social/posts",
         headers=headers,
@@ -225,8 +228,12 @@ def test_social_feed_orders_friends_before_public_and_respects_visibility(client
 
 def test_social_profile_visibility_and_like_comment_flow(client, auth_headers):
     other_user = _create_verified_user(client, "profile")
-    public_post = _create_progress_post(client, other_user["headers"], visibility="public", caption="public-profile-post", weight_kg=79)
-    _create_progress_post(client, other_user["headers"], visibility="private", caption="private-profile-post", weight_kg=78)
+    public_post = _create_progress_post(
+        client, other_user["headers"], visibility="public", caption="public-profile-post", weight_kg=79
+    )
+    _create_progress_post(
+        client, other_user["headers"], visibility="private", caption="private-profile-post", weight_kg=78
+    )
 
     profile_response = client.get(f"/social/users/{other_user['user']['id']}/posts", headers=auth_headers)
     assert profile_response.status_code == 200
@@ -256,7 +263,9 @@ def test_social_profile_visibility_and_like_comment_flow(client, auth_headers):
 def test_social_feed_cursor_pagination(client, auth_headers):
     other_user = _create_verified_user(client, "cursor")
     for index in range(3):
-        _create_progress_post(client, other_user["headers"], visibility="public", caption=f"cursor-{index}", weight_kg=70 + index)
+        _create_progress_post(
+            client, other_user["headers"], visibility="public", caption=f"cursor-{index}", weight_kg=70 + index
+        )
 
     page_1 = client.get("/social/feed?scope=explore&limit=2", headers=auth_headers)
     assert page_1.status_code == 200
@@ -329,8 +338,12 @@ def test_social_feed_supports_sort_and_type_filters(client, auth_headers, engine
     accept_response = client.post(f"/social/friends/requests/{request_id}/accept", headers=friend_user["headers"])
     assert accept_response.status_code == 200
 
-    friend_post = _create_progress_post(client, friend_user["headers"], visibility="friends", caption="friend-relevance", weight_kg=80)
-    public_post = _create_progress_post(client, public_user["headers"], visibility="public", caption="public-recent", weight_kg=72)
+    friend_post = _create_progress_post(
+        client, friend_user["headers"], visibility="friends", caption="friend-relevance", weight_kg=80
+    )
+    public_post = _create_progress_post(
+        client, public_user["headers"], visibility="public", caption="public-recent", weight_kg=72
+    )
     recipe_post = _create_recipe_post(client, public_user["headers"], visibility="public", caption="public-recipe")
 
     with Session(engine) as session:
